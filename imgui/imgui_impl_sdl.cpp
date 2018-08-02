@@ -275,7 +275,7 @@ void ImGui_ImplSDL2_NewFrame(SDL_Window* window)
     SDL_GetWindowSize(window, &w, &h);
     SDL_GL_GetDrawableSize(window, &display_w, &display_h);
     io.DisplaySize = ImVec2((float)w, (float)h);
-    io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
+   io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
 
     // Setup time step (we don't use SDL_GetTicks() because it is using millisecond resolution)
     static Uint64 frequency = SDL_GetPerformanceFrequency();

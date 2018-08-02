@@ -8,6 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		3226566920D474B3003F79E2 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3226566820D474B3003F79E2 /* CoreGraphics.framework */; };
+		326BD417210B56AC001902BF /* MetalRendererHelper.mm in Sources */ = {isa = PBXBuildFile; fileRef = 326BD416210B56AC001902BF /* MetalRendererHelper.mm */; };
+		326BD419210B647E001902BF /* CommonShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 326BD418210B647E001902BF /* CommonShaders.metal */; };
+		326BD41D210E760E001902BF /* CommonData.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 326BD41C210E760E001902BF /* CommonData.cpp */; };
+		326BD42021112BE3001902BF /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = 326BD41E21112BE3001902BF /* imgui_impl_metal.mm */; };
+		326BD42321134677001902BF /* GLRenderHelper.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 326BD42121134677001902BF /* GLRenderHelper.cpp */; };
 		3274CA0621067B540069A49B /* libSDL2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3274CA0521067B540069A49B /* libSDL2.a */; };
 		328C1D2B20F960E8003A480D /* libboost_filesystem-mt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 328C1D2A20F960E7003A480D /* libboost_filesystem-mt.dylib */; };
 		328C1D2D20F96113003A480D /* libboost_system-mt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 328C1D2C20F96113003A480D /* libboost_system-mt.dylib */; };
@@ -41,6 +46,15 @@
 
 /* Begin PBXFileReference section */
 		3226566820D474B3003F79E2 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		326BD415210B56AC001902BF /* RendererHelper.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = RendererHelper.h; sourceTree = "<group>"; };
+		326BD416210B56AC001902BF /* MetalRendererHelper.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = MetalRendererHelper.mm; sourceTree = "<group>"; };
+		326BD418210B647E001902BF /* CommonShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CommonShaders.metal; sourceTree = "<group>"; };
+		326BD41A210B649B001902BF /* CommonShaderTypes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CommonShaderTypes.h; sourceTree = "<group>"; };
+		326BD41B210E7592001902BF /* CommonData.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CommonData.h; sourceTree = "<group>"; };
+		326BD41C210E760E001902BF /* CommonData.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = CommonData.cpp; sourceTree = "<group>"; };
+		326BD41E21112BE3001902BF /* imgui_impl_metal.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = imgui_impl_metal.mm; sourceTree = "<group>"; };
+		326BD41F21112BE3001902BF /* imgui_impl_metal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = imgui_impl_metal.h; sourceTree = "<group>"; };
+		326BD42121134677001902BF /* GLRenderHelper.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = GLRenderHelper.cpp; sourceTree = "<group>"; };
 		3274CA0521067B540069A49B /* libSDL2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libSDL2.a; path = mac/libSDL2.a; sourceTree = "<group>"; };
 		327A108B210674B10082E63E /* encodedNormals.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = encodedNormals.h; sourceTree = "<group>"; };
 		328C1D2A20F960E7003A480D /* libboost_filesystem-mt.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libboost_filesystem-mt.dylib"; path = "../../../usr/local/Cellar/boost/1.67.0_1/lib/libboost_filesystem-mt.dylib"; sourceTree = "<group>"; };
@@ -128,6 +142,8 @@
 		3274CA0421067A870069A49B /* imgui */ = {
 			isa = PBXGroup;
 			children = (
+				326BD41F21112BE3001902BF /* imgui_impl_metal.h */,
+				326BD41E21112BE3001902BF /* imgui_impl_metal.mm */,
 				32BF6D8120F9075B00B337B0 /* imgui_impl_opengl3.cpp */,
 				32BF6D8220F9075C00B337B0 /* imgui_impl_opengl3.h */,
 				32BF6D7920F9060800B337B0 /* imconfig.h */,
@@ -175,6 +191,13 @@
 				329FE14920CC9A8B000BD9BA /* main.cpp */,
 				329FE14B20CC9A8B000BD9BA /* TribesViewer.entitlements */,
 				327A108B210674B10082E63E /* encodedNormals.h */,
+				326BD415210B56AC001902BF /* RendererHelper.h */,
+				326BD42121134677001902BF /* GLRenderHelper.cpp */,
+				326BD416210B56AC001902BF /* MetalRendererHelper.mm */,
+				326BD418210B647E001902BF /* CommonShaders.metal */,
+				326BD41A210B649B001902BF /* CommonShaderTypes.h */,
+				326BD41B210E7592001902BF /* CommonData.h */,
+				326BD41C210E760E001902BF /* CommonData.cpp */,
 			);
 			path = TribesViewer;
 			sourceTree = "<group>";
@@ -275,15 +298,20 @@
 				32C7821C20D548C500FB6496 /* quat.cpp in Sources */,
 				32C7821A20D548C500FB6496 /* vec2.cpp in Sources */,
 				32BF6D8020F9060800B337B0 /* imgui.cpp in Sources */,
+				326BD41D210E760E001902BF /* CommonData.cpp in Sources */,
 				32C7821F20D548CC00FB6496 /* gl3w.c in Sources */,
 				32BF6D8320F9075C00B337B0 /* imgui_impl_opengl3.cpp in Sources */,
 				32BF6D7E20F9060800B337B0 /* imgui_impl_sdl.cpp in Sources */,
+				326BD42021112BE3001902BF /* imgui_impl_metal.mm in Sources */,
 				32C7821620D548C500FB6496 /* float_util.cpp in Sources */,
+				326BD417210B56AC001902BF /* MetalRendererHelper.mm in Sources */,
 				32C7821920D548C500FB6496 /* vec3.cpp in Sources */,
 				329FE14220CC9A89000BD9BA /* AppDelegate.mm in Sources */,
 				32C7821820D548C500FB6496 /* mat4.cpp in Sources */,
 				32C7821720D548C500FB6496 /* vec4.cpp in Sources */,
 				32C7821D20D548C500FB6496 /* runtime_checks.cpp in Sources */,
+				326BD42321134677001902BF /* GLRenderHelper.cpp in Sources */,
+				326BD419210B647E001902BF /* CommonShaders.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,6 +448,11 @@
 				CODE_SIGN_ENTITLEMENTS = TribesViewer/TribesViewer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				"GCC_PREPROCESSOR_DEFINITIONS[arch=*]" = (
+					"DEBUG=1",
+					"$(inherited)",
+					"USE_OPENGL=1",
+				);
 				HEADER_SEARCH_PATHS = (
 					include,
 					mac/include,

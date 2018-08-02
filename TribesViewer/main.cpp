@@ -30,11 +30,8 @@
 #include <cmath>
 #include <unordered_map>
 #include <slm/slmath.h>
-#include <GL/gl3w.h>
 
 #include "imgui.h"
-#include "imgui_impl_sdl.h"
-#include "imgui_impl_opengl3.h"
 
 #ifndef NO_BOOST
 #include <boost/filesystem.hpp>
@@ -43,12 +40,11 @@ namespace fs = boost::filesystem;
 #include <filesystem>
 #endif
 
-#ifdef HAVE_OPENGLES2
-#define GL_GLEXT_PROTOTYPES
-#include "SDL_opengles2.h"
-#else
-#include "SDL_opengl.h"
-#endif
+#include "CommonShaderTypes.h"
+#include "RendererHelper.h"
+
+// The max number of command buffers in flight
+static const uint32_t TVMaxBuffersInFlight = 3;
 
 // Run of the mill quaternion interpolator
 slm::quat CompatInterpolate( slm::quat const & q1,
@@ -134,782 +130,8 @@ void CompatQuatSetMatrix(const slm::quat rot, slm::mat4 &outMat)
    outMat[3] = slm::vec4(0.0f,0.0f,0.0f,1.0f);
 }
 
-class MemRStream;
 
-// Root class for PERS objects
-class DarkstarPersistObject
-{
-public:
-   
-   enum
-   {
-      IDENT_PERS = 1397900624
-   };
-   
-   virtual ~DarkstarPersistObject(){;}
-   virtual bool read(MemRStream &io, int version)=0;
-   
-   typedef std::unordered_map<uint32_t, std::function<DarkstarPersistObject*()> > IDFuncMap;
-   typedef std::unordered_map<std::string, std::function<DarkstarPersistObject*()> > NamedFuncMap;
-   static IDFuncMap smIDCreateFuncs;
-   static NamedFuncMap smNamedCreateFuncs;
-   static void initStatics();
-   
-   template<class T> static DarkstarPersistObject* _createClass() { return new T(); }
-   static void registerClass(std::string className, std::function<DarkstarPersistObject*()> func)
-   {
-      smNamedCreateFuncs[className] = func;
-   }
-   
-   static void registerClassID(uint32_t tag, std::function<DarkstarPersistObject*()> func)
-   {
-      smIDCreateFuncs[tag] = func;
-   }
-   
-   static DarkstarPersistObject* createClassByName(std::string name)
-   {
-      NamedFuncMap::iterator itr = smNamedCreateFuncs.find(name);
-      if (itr != smNamedCreateFuncs.end())
-      {
-         return itr->second();
-      }
-      return NULL;
-   }
-   
-   static DarkstarPersistObject* createClassByTag(uint32_t tag)
-   {
-      IDFuncMap::iterator itr = smIDCreateFuncs.find(tag);
-      if (itr != smIDCreateFuncs.end())
-      {
-         return itr->second();
-      }
-      return NULL;
-   }
-   
-   static DarkstarPersistObject* createFromStream(MemRStream &mem);
-};
-
-DarkstarPersistObject::NamedFuncMap DarkstarPersistObject::smNamedCreateFuncs;
-DarkstarPersistObject::IDFuncMap DarkstarPersistObject::smIDCreateFuncs;
-
-class MemRStream
-{
-public:
-   uint32_t mPos;
-   uint32_t mSize;
-   uint8_t* mPtr;
-   
-   bool mOwnPtr;
-   
-   MemRStream(uint32_t sz, void* ptr, bool ownPtr=false) : mPos(0), mSize(sz), mPtr((uint8_t*)ptr), mOwnPtr(ownPtr) {;}
-   MemRStream(MemRStream &&other)
-   {
-      mPtr = other.mPtr;
-      mPos = other.mPos;
-      mSize = other.mSize;
-      other.mOwnPtr = false;
-      mOwnPtr = true;
-   }
-   MemRStream(MemRStream &other)
-   {
-      mPtr = other.mPtr;
-      mPos = other.mPos;
-      mSize = other.mSize;
-      other.mOwnPtr = false;
-      mOwnPtr = true;
-   }
-   MemRStream& operator=(MemRStream other)
-   {
-      mPtr = other.mPtr;
-      mPos = other.mPos;
-      mSize = other.mSize;
-      other.mOwnPtr = false;
-      mOwnPtr = true;
-      return *this;
-   }
-   ~MemRStream()
-   {
-      if(mOwnPtr)
-         free(mPtr);
-   }
-   
-   // For array types
-   template<class T, int N> inline bool read( T (&value)[N] )
-   {
-      if (mPos >= mSize || mPos+(sizeof(T)*N) > mSize)
-         return false;
-      
-      memcpy(&value, mPtr+mPos, sizeof(T)*N);
-      mPos += sizeof(T)*N;
-      
-      return true;
-   }
-   
-   // For normal scalar types
-   template<typename T> inline bool read(T &value)
-   {
-      T* tptr = (T*)(mPtr+mPos);
-      if (mPos >= mSize || mPos+sizeof(T) > mSize)
-         return false;
-      
-      value = *tptr;
-      mPos += sizeof(T);
-      
-      return true;
-   }
-   
-   inline bool read(uint32_t size, void* data)
-   {
-      if (mPos >= mSize || mPos+size > mSize)
-         return false;
-      
-      memcpy(data, mPtr+mPos, size);
-      mPos += size;
-      
-      return true;
-   }
-   
-   inline bool readSString(std::string &outS)
-   {
-      uint16_t size;
-      if (!read(size)) return false;
-      
-      int real_size = (size + 1) & (~1); // dword padded
-      char *str = new char[real_size+1];
-      if (read(real_size, str))
-      {
-         str[real_size] = '\0';
-         outS = str;
-         delete[] str;
-         return true;
-      }
-      else
-      {
-         delete[] str;
-         return false;
-      }
-   }
-   
-   inline void setPosition(uint32_t pos)
-   {
-      if (pos > mSize)
-         return;
-      mPos = pos;
-   }
-   
-   inline uint32_t getPosition() { return mPos; }
-   
-   inline bool isEOF() { return mPos >= mSize; }
-};
-
-class IFFBlock
-{
-public:
-   enum
-   {
-      ALIGN_DWORD = 0x80000000
-   };
-   
-   uint32_t ident;
-protected:
-   uint32_t size;
-   
-public:
-   IFFBlock() : ident(0), size(0) {;}
-   
-   inline uint32_t getSize() const
-   {
-      if (size & ALIGN_DWORD)
-         return ((size & ~ALIGN_DWORD) + 3) & ~3;
-      else
-         return ( (size + 1) & (~1) );
-   }
-   
-   inline uint32_t getRawSize() const { return size; }
-   
-   inline void seekToEnd(uint32_t startPos, MemRStream &mem)
-   {
-      mem.setPosition(startPos + getSize() + 8);
-   }
-};
-
-DarkstarPersistObject* DarkstarPersistObject::createFromStream(MemRStream& mem)
-{
-   IFFBlock block;
-   uint32_t version = 0;
-   mem.read(block);
-   uint32_t start = mem.getPosition();
-   std::string className;
-   
-   DarkstarPersistObject* obj;
-   
-   if (block.ident == IDENT_PERS)
-   {
-      mem.readSString(className);
-      mem.read(version);
-      
-      obj = createClassByName(className);
-   }
-   else
-   {
-      // Try tag
-      obj = createClassByTag(block.ident);
-   }
-   
-   assert(obj);
-   
-   // Try reading obj
-   if (obj && !obj->read(mem, version))
-   {
-      delete obj;
-      obj = NULL;
-   }
-   
-   mem.setPosition(start+block.getSize());
-   return obj;
-}
-
-class Palette
-{
-public:
-   enum
-   {
-      IDENT_PL98 = 943279184,
-      IDENT_PPAL = 1279348816,
-      IDENT_PAL = 541868368,
-      IDENT_RIFF = 1179011410,
-      IDENT_head = 1684104552,
-      IDENT_info = 1868983913,
-      IDENT_data = 1635017060,
-      IDENT_pspl = 1819308912,
-      IDENT_ptpl = 1819309168,
-      IDENT_hzpl = 1819309168
-   };
-   
-   enum
-   {
-      PALETTE_NOREMAP = 0,
-      PALETTE_SHADEHAZE = 1,
-      PALETTE_TRANSLUCENT = 2,
-      PALETTE_COLORQUANT = 3,
-      PALETTE_ALPHAQUANT = 4,
-      PALETTE_ADDITIVEQUANT = 5,
-      PALETTE_ADDITIVE = 6,
-      PALETTE_SUBTRACTIVEQUANT = 7,
-      PALETTE_SUBTRACTIVE = 8
-   };
-   
-   // Palette entry
-   struct Data
-   {
-      int32_t index;
-      uint32_t type;
-      uint32_t colors[256];
-      
-      // Shade/Haze/Translucency mappings
-      uint8_t *shadeMap;
-      uint8_t *hazeMap;
-      uint8_t *transMap;
-      
-      // Extra mappings
-      uint8_t* colIdx;
-      float* colR;
-      float* colG;
-      float* colB;
-      float* colA;
-      
-      Data() : index(0), type(0), shadeMap(NULL), hazeMap(NULL), transMap(NULL), colIdx(0), colR(0), colG(0), colB(0), colA(0) {;}
-      inline void lookupRGB(uint8_t idx, uint8_t &outR, uint8_t &outG, uint8_t &outB)
-      {
-         uint32_t col = colors[idx];
-         outR = col & 0xFF;
-         outG = (col >> 8) & 0xFF;
-         outB = (col >> 16) & 0xFF;
-      }
-      inline void lookupRGBA(uint8_t idx, uint8_t &outR, uint8_t &outG, uint8_t &outB, uint8_t &outA)
-      {
-         uint32_t col = colors[idx];
-         outR = col & 0xFF;
-         outG = (col >> 8) & 0xFF;
-         outB = (col >> 16) & 0xFF;
-         outA = (col >> 24) & 0xFF;
-      }
-   };
-   
-   int32_t mShadeShift;
-   int32_t mShadeLevels;
-   int32_t mHazeLevels;
-   int32_t mHazeColor;
-   uint8_t mAllowedMatches[32];
-   float mColorWeights[256];
-   uint32_t mWeightStart;
-   uint32_t mWeightEnd;
-   uint8_t* mRemapData;
-   
-   std::vector<Data> mPalettes;
-   
-   Palette() : mRemapData(NULL)
-   {
-   }
-   
-   ~Palette()
-   {
-      if (mRemapData) free(mRemapData);
-   }
-   
-   bool readMSPAL(MemRStream& mem)
-   {
-      IFFBlock block;
-      mem.read(block);
-      
-      if (block.ident != IDENT_RIFF)
-      {
-         return false;
-      }
-      
-      mem.read(block);
-      if (block.ident != IDENT_PAL)
-      {
-         return false;
-      }
-      
-      uint16_t numColors, version;
-      mem.read(numColors);
-      mem.read(version);
-      
-      mPalettes.push_back(Data());
-      Data& lp = mPalettes.back();
-      memset(lp.colors, '\0', sizeof(lp.colors));
-      lp.type = PALETTE_NOREMAP;
-      
-      uint32_t colsToRead = std::min<uint32_t>(numColors, 256);
-      mem.read(colsToRead*4, lp.colors);
-      mem.mPos += (numColors - colsToRead) * 4;
-      
-      return true;
-   }
-   
-   uint32_t calcLookupSize(uint32_t type)
-   {
-      const uint32_t baseSize = 256 + (4 * (256 * 4));
-      switch(type)
-      {
-         case PALETTE_SHADEHAZE:
-            return (256 * mShadeLevels * (mHazeLevels + 1)) + baseSize;
-         case PALETTE_TRANSLUCENT:
-         case PALETTE_ADDITIVE:
-         case PALETTE_SUBTRACTIVE:
-            return 65536 + baseSize;
-         case PALETTE_NOREMAP:
-            return 256 + baseSize;
-         default:
-            return 0;
-      }
-   }
-   
-   bool read(MemRStream& mem)
-   {
-      IFFBlock block;
-      mem.read(block);
-      if (block.ident == IDENT_RIFF)
-      {
-         mem.setPosition(0);
-         return readMSPAL(mem);
-      }
-      else if (block.ident == IDENT_PPAL)
-      {
-         mem.read(block); // head
-         if (block.ident != IDENT_head)
-            return false;
-         
-         uint8_t version;
-         mem.read(version);
-         
-         if (version != 3)
-            return false;
-         
-         uint16_t tmp;
-         mem.read(tmp);
-         
-         uint8_t tmp2;
-         mem.read(tmp2);
-         mShadeShift = tmp2;
-         mShadeLevels = 1 << mShadeShift;
-         mHazeLevels = 0;
-         
-         uint32_t startPos = mem.getPosition();
-         mem.read(block);
-         
-         //
-         if (block.ident == IDENT_info)
-         {
-            block.seekToEnd(startPos, mem);
-            mem.read(block);
-         }
-         
-         if (block.ident != IDENT_data)
-            return false;
-         
-         mPalettes.resize(1);
-         Data* entry = &mPalettes[0];
-         
-         entry->type = PALETTE_NOREMAP;
-         entry->index = -1;
-         mem.read(entry->colors);
-         
-         // TODO: read remap chunks, should work the same as in PL98
-      }
-      else if (block.ident == IDENT_PL98)
-      {
-         mPalettes.resize(block.getRawSize());
-         
-         mem.read(mShadeShift);
-         mShadeLevels = 1 << mShadeShift;
-         mem.read(mHazeLevels);
-         mem.read(mHazeColor);
-         uint32_t sp = mem.getPosition();
-         mem.read(mAllowedMatches);
-         assert(mem.getPosition()-sp == 32);
-         
-         uint32_t lookupSize = 0;
-         for (std::vector<Data>::iterator itr=mPalettes.begin(), itrEnd = mPalettes.end(); itr != itrEnd; itr++)
-         {
-            Data* entry = &*itr;
-            *entry = Data();
-            
-            sp = mem.getPosition();
-            mem.read(entry->colors);
-            assert(mem.getPosition()-sp == 1024);
-            sp = mem.getPosition();
-            mem.read(entry->index);
-            mem.read(entry->type);
-            assert(mem.getPosition()-sp == 8);
-            
-            uint32_t palLookupSize = calcLookupSize(entry->type);
-            lookupSize += palLookupSize;
-         }
-         
-         mRemapData = (uint8_t*)malloc(lookupSize);
-         mem.read(lookupSize, mRemapData);
-         
-         // Assign lookup ptrs
-         // NOTE: data is stored as shadeMap+hazeMap[], remap(sh/tr/ad/sub)[], noremap[]
-         uint8_t *pRemap = mRemapData;
-         for (std::vector<Data>::iterator itr=mPalettes.begin(), itrEnd = mPalettes.end(); itr != itrEnd; itr++)
-         {
-            if (itr->type == PALETTE_SHADEHAZE)
-            {
-               const uint32_t sz1 = 256 * mShadeLevels * mHazeLevels;
-               const uint32_t sz2 = 256 * mShadeLevels;
-               
-               itr->shadeMap = pRemap + sz1;
-               pRemap += sz1;
-               itr->hazeMap = pRemap + sz1;
-               pRemap += sz2;
-            }
-            else if (itr->type == PALETTE_TRANSLUCENT || itr->type == PALETTE_ADDITIVE || itr->type == PALETTE_SUBTRACTIVE)
-            {
-               itr->transMap = pRemap;
-               pRemap += 65536;
-            }
-         }
-         
-         for (std::vector<Data>::iterator itr=mPalettes.begin(), itrEnd = mPalettes.end(); itr != itrEnd; itr++)
-         {
-            if (itr->type == PALETTE_NOREMAP ||
-                itr->type == PALETTE_COLORQUANT ||
-                itr->type == PALETTE_ALPHAQUANT ||
-                itr->type == PALETTE_ADDITIVEQUANT ||
-                itr->type == PALETTE_SUBTRACTIVEQUANT)
-               continue;
-            
-            itr->colIdx = pRemap; pRemap += 256;
-            itr->colR = (float*)pRemap; pRemap += 256*4;
-            itr->colG = (float*)pRemap; pRemap += 256*4;
-            itr->colB = (float*)pRemap; pRemap += 256*4;
-            itr->colA = (float*)pRemap; pRemap += 256*4;
-         }
-         
-         for (std::vector<Data>::iterator itr=mPalettes.begin(), itrEnd = mPalettes.end(); itr != itrEnd; itr++)
-         {
-            if (itr->type != PALETTE_NOREMAP)
-               continue;
-            itr->colIdx = pRemap; pRemap += 256;
-            itr->colR = (float*)pRemap; pRemap += 256*4;
-            itr->colG = (float*)pRemap; pRemap += 256*4;
-            itr->colB = (float*)pRemap; pRemap += 256*4;
-            itr->colA = (float*)pRemap; pRemap += 256*4;
-         }
-         
-         assert(pRemap - mRemapData == lookupSize);
-         
-         uint8_t weightPresent = 0;
-         uint32_t dummy;
-         mem.read(weightPresent);
-         if (weightPresent)
-         {
-            mem.read(mColorWeights);
-            mem.read(mWeightStart);
-            mem.read(mWeightEnd);
-         }
-         
-         mem.read(dummy);
-      }
-      
-      return true;
-   }
-   
-   Data* getPaletteByIndex(uint32_t idx)
-   {
-      for (Data& dat : mPalettes)
-      {
-         if (dat.index == idx)
-            return &dat;
-      }
-      
-      return &mPalettes[0]; // fallback
-   }
-};
-
-class Bitmap
-{
-public:
-   
-   enum
-   {
-      IDENT_BM00 = 19778,
-      IDENT_piDX = 1480878416,
-      IDENT_PBMP = 1347240528,
-      IDENT_head = 1684104552,
-      IDENT_RIFF = 1179011410,
-      IDENT_PAL  = 541868368,
-      IDENT_DETL = 1280591172,
-      IDENT_data = 1635017060
-   };
-   
-   enum
-   {
-      FLAG_NORMAL = 0x0,
-      FLAG_TRANSPARENT = 0x1,
-      FLAG_FUZZY = 0x2,
-      FLAG_TRANSLUCENT = 0x4,
-      FLAG_OWN_MEM = 0x8,
-      FLAG_ADDITIVE = 0x10,
-      FLAG_SUBTRACTIVE = 0x20,
-      FLAG_ALPHA8 = 0x40,
-      
-      MAX_MIPS = 9
-   };
-   
-   // MS BMP Stuff
-   struct RGBQUAD
-   {
-      uint8_t rgbBlue;
-      uint8_t rgbGreen;
-      uint8_t rgbRed;
-      uint8_t rgbReserved;
-   };
-   
-#pragma pack(2)
-   struct BITMAPFILEHEADER
-   {
-      uint16_t bfType;
-      uint32_t bfSize;
-      uint16_t bfReserved1;
-      uint16_t bfReserved2;
-      uint32_t bfOffBits;
-   };
-#pragma pack()
-   
-#pragma pack(2)
-   struct BITMAPINFOHEADER
-   {
-      uint32_t biSize;
-      int32_t biWidth;
-      int32_t biHeight;
-      uint16_t biPlanes;
-      uint16_t biBitCount;
-      uint32_t biCompression;
-      uint32_t biSizeImage;
-      int32_t biXPelsPerMeter;
-      int32_t biYPelsPerMeter;
-      uint32_t biClrUsed;
-      uint32_t biClrImportant;
-   };
-#pragma pack()
-   //
-   
-   uint32_t mWidth;
-   uint32_t mHeight;
-   uint32_t mBitDepth;
-   uint32_t mFlags;
-   uint32_t mStride;
-   
-   uint32_t mMipLevels;
-   int32_t mPaletteIndex;
-   
-   uint8_t* mData;
-   char* mUserData;
-   uint8_t* mMips[MAX_MIPS];
-   
-   Palette* mPal;
-   
-   Bitmap() : mData(NULL), mUserData(NULL), mPal(NULL) {;}
-   ~Bitmap()
-   {
-      if (mData) free(mData);
-      if (mUserData) free(mUserData);
-      if (mPal) delete mPal;
-   }
-   
-   bool readMSBMP(MemRStream& mem)
-   {
-      BITMAPFILEHEADER header;
-      BITMAPINFOHEADER info_header;
-      
-      mem.read(header);
-      mem.read(info_header);
-      mWidth = info_header.biWidth;
-      mHeight = abs(info_header.biHeight);
-      mBitDepth = info_header.biBitCount;
-      mFlags = 0;
-      mStride = getStride(mWidth);
-      mMipLevels = 1;
-      memset(mMips, '\0', sizeof(mMips));
-      mPaletteIndex = (header.bfReserved1 == 0xf5f7 && header.bfReserved2 != 0xffff) ? (int32_t)header.bfReserved2 : -1;
-      
-      if ((header.bfType & 0xFFFF) != IDENT_BM00)
-      {
-         return false;
-      }
-      
-      if(info_header.biBitCount == 8)
-      {
-         // Read pal
-         mPal = new Palette();
-         mPal->mPalettes.push_back(Palette::Data());
-         Palette::Data& lp = mPal->mPalettes.back();
-         
-         memset(lp.colors, '\0', sizeof(lp.colors));
-         lp.type = Palette::PALETTE_NOREMAP;
-         
-         uint32_t colsToRead = std::min<uint32_t>(info_header.biClrUsed, 256);
-         mem.read(colsToRead*4, lp.colors);
-         mem.mPos += (info_header.biClrUsed - colsToRead) * 4;
-      }
-      
-      mData = (uint8_t*)malloc(mHeight * mStride);
-      memset(mData, '\0', mHeight * mStride);
-      mMips[0] = mData;
-      
-      for(uint32_t i = 0; i < info_header.biHeight; i++)
-      {
-         uint8_t *rowDest = getAddress(0, 0, info_header.biHeight - i - 1);
-         mem.read(mStride, rowDest);
-      }
-      
-      return true;
-   }
-   
-   inline uint32_t getStride(uint32_t width) const { return 4 * ((width * mBitDepth + 31)/32); }
-   
-   uint8_t* getAddress(uint32_t mip, uint32_t x, uint32_t y)
-   {
-      assert(mip == 0);
-      uint32_t stride = getStride(mWidth);
-      return mMips[mip] + ((stride * y) + ((mBitDepth * x) / 8));
-   }
-   
-   bool read(MemRStream& mem)
-   {
-      IFFBlock block;
-      mem.read(block);
-      uint32_t expectedChunks=UINT_MAX-1;
-      uint32_t version = 0;
-      mPaletteIndex = -1;
-      
-      if ((block.ident & 0xFFFF) == IDENT_BM00)
-      {
-         mem.setPosition(0);
-         return readMSBMP(mem);
-      }
-      else if (block.ident != IDENT_PBMP)
-      {
-         // Unlikely to be darkstar bmp
-         return false;
-      }
-      
-      while (!mem.isEOF() && expectedChunks != 0)
-      {
-         uint32_t startPos = mem.getPosition();
-         mem.read(block);
-         expectedChunks -= 1;
-         
-         switch (block.ident)
-         {
-            case IDENT_head:
-               mem.read(version);
-               mem.read(mWidth);
-               mem.read(mHeight);
-               mem.read(mBitDepth);
-               mem.read(mFlags);
-               expectedChunks = version & 0xFFFFFF;
-               block.seekToEnd(startPos, mem);
-               
-               if (version >> 24 != 0)
-                  return false;
-               
-               break;
-            case IDENT_DETL:
-               mem.read(mMipLevels);
-               block.seekToEnd(startPos, mem);
-               break;
-            case IDENT_piDX:
-               mem.read(mPaletteIndex);
-               block.seekToEnd(startPos, mem);
-               break;
-            case IDENT_data:
-               if (mData) free(mData);
-               mData = (uint8_t*)malloc(block.getSize());
-               mem.read(block.getSize(), mData);
-               block.seekToEnd(startPos, mem);
-               break;
-            case IDENT_RIFF:
-               // Embedded MS palette
-               if (mPal) delete mPal;
-               mPal = new Palette();
-               mem.setPosition(mem.getPosition()-4);
-               
-               if (!mPal->readMSPAL(mem))
-               {
-                  return false;
-               }
-               
-               block.seekToEnd(startPos, mem);
-               break;
-            default:
-               block.seekToEnd(startPos, mem);
-               break;
-         }
-      }
-      
-      mStride = getStride(mWidth);
-      
-      // Setup mips
-      memset(mMips, '\0', sizeof(mMips));
-      uint8_t* ptr = mData;
-      uint32_t mipSize = mStride * mHeight;
-      
-      for (uint32_t i=0; i<mMipLevels; i++)
-      {
-         mMips[i] = ptr;
-         ptr += mipSize;
-         mipSize /= 4;
-      }
-      
-      return true;
-   }
-};
+#include "CommonData.h"
 
 class Volume
 {
@@ -2039,104 +1261,6 @@ void DarkstarPersistObject::initStatics()
    registerClass("TS::CelAnimMesh", &_createClass<CelAnimMesh>);
 }
 
-const char* sStandardFragmentProgram = "#version 330 core\n\
-\n\
-in vec2 vTexCoord0;\n\
-in vec4 vColor0;\n\
-uniform sampler2D texture0;\n\
-uniform float alphaTestF;\n\
-out vec4 Color;\n\
-\n\
-void main()\n\
-{\n\
-Color = texture(texture0, vTexCoord0);\n\
-if (Color.a > alphaTestF) discard;\n\
-Color.r = Color.r * vColor0.r * vColor0.a;\n\
-Color.g = Color.g * vColor0.g * vColor0.a;\n\
-Color.b = Color.b * vColor0.b * vColor0.a;\n\
-}\n\
-";
-
-const char* sStandardVertexProgram = "#version 330 core\n\
-\n\
-layout(location = 0) in vec3 aPosition;\n\
-layout(location = 1) in vec3 aNormal;\n\
-layout(location = 2) in vec2 aTexCoord0;\n\
-\n\
-uniform mat4 worldMatrixProjection;\n\
-uniform mat4 worldMatrix;\n\
-uniform vec3 lightPos;\n\
-uniform vec3 lightColor;\n\
-\n\
-out vec2 vTexCoord0;\n\
-out vec4 vColor0;\n\
-\n\
-void main()\n\
-{\n\
-vec3 normal, lightDir;\n\
-vec4 diffuse;\n\
-float NdotL;\n\
-\n\
-normal = normalize(mat3(worldMatrix) * aNormal);\n\
-\n\
-lightDir = normalize(vec3(lightPos));\n\
-\n\
-NdotL = max(dot(normal, lightDir), 0.0);\n\
-\n\
-diffuse = vec4(lightColor, 1.0);\n\
-\n\
-gl_Position = worldMatrixProjection * vec4(aPosition,1);\n\
-vTexCoord0 = aTexCoord0;\n\
-vColor0 = NdotL * diffuse;\n\
-vColor0.a = 1.0;\n\
-}\n\
-";
-
-const char* sLineFragmentProgram = "#version 330 core\n\
-\n\
-in vec4 vColor0;\n\
-out vec4 Color;\n\
-\n\
-void main()\n\
-{\n\
-Color = vColor0;\n\
-}\n\
-";
-
-const char* sLineVertexProgram = "#version 330 core\n\
-\n\
-in vec3 aPosition;\n\
-in vec3 aNormal;\n\
-in vec4 aColor0;\n\
-in vec3 aNext;\n\
-\n\
-uniform mat4 projection;\n\
-uniform mat4 worldMatrix;\n\
-uniform float lineWidth;\n\
-uniform vec2 viewportScale;\n\
-\n\
-out vec4 vColor0;\n\
-\n\
-void main()\n\
-{\n\
-vec4 startPos = worldMatrix * vec4(aPosition, 1);\n\
-vec4 endPos = worldMatrix * vec4(aNext, 1);\n\
-vec4 projStartPos = projection * startPos;\n\
-vec4 projEndPos = projection * endPos;\n\
-vec4 dp = projEndPos - projStartPos;\n\
-vec4 delta = normalize(vec4(dp.x, dp.y, 0, 0));\n\
-delta = vec4(-delta.y, delta.x, 0, 0);\n\
-vec4 realDelta = vec4(0,0,0,0);\n\
-realDelta += delta * aNormal.x;\n\
-realDelta = realDelta * lineWidth;\n\
-gl_Position = ((projection * worldMatrix) * (vec4(aPosition, 1)));\n\
-gl_Position.xyz /= gl_Position.w;\n\
-gl_Position += vec4((realDelta.xy * viewportScale), 0, 0);\n\
-gl_Position.w = gl_Position.z = 1;\n\
-vColor0 = aColor0;\n\
-}\n\
-";
-
 class ShapeViewer
 {
 public:
@@ -2171,52 +1295,6 @@ public:
       RuntimeDetailInfo(uint32_t so, uint32_t nro) : startRenderObject(so), numRenderObjects(nro) {;}
    };
    
-   enum ShaderAttribs
-   {
-      kVertexAttrib_Position,
-      kVertexAttrib_Position_Normals,
-      kVertexAttrib_Position_TexCoords,
-      kVertexAttrib_Position_Color,
-      kVertexAttrib_Position_Next,
-      kVertexAttrib_COUNT
-   };
-   
-   enum ShaderUniforms
-   {
-      kUniform_MVPMatrix,
-      kUniform_MVMatrix,
-      kUniform_LightPos,
-      kUniform_LightColor,
-      kUniform_AlphaTestVal,
-      kUniform_SamplerID,
-      kUniform_COUNT
-   };
-   
-   enum LineShaderUniforms
-   {
-      kLineUniform_PMatrix,
-      kLineUniform_MVMatrix,
-      kLineUniform_Width,
-      kLineUniform_ViewportScale,
-      kLineUniform_COUNT
-   };
-   
-   struct ProgramInfo
-   {
-      GLuint programID;
-      GLint uniformLocations[kUniform_COUNT];
-      ProgramInfo() : programID(0) { memset(uniformLocations, '\0', sizeof(uniformLocations)); }
-   };
-   
-   struct LineProgramInfo
-   {
-      GLuint programID;
-      GLint uniformLocations[kLineUniform_COUNT];
-      LineProgramInfo() : programID(0) { memset(uniformLocations, '\0', sizeof(uniformLocations)); }
-   };
-   
-   const uint32_t kLineVertSize = (sizeof(slm::vec3) * 3) + sizeof(slm::vec4);
-   
    struct ShapeThread
    {
       enum State
@@ -2246,22 +1324,6 @@ public:
    
    bool initVB;
    
-   struct _LineVert
-   {
-      slm::vec3 pos;
-      slm::vec3 nextPos;
-      slm::vec3 normal;
-      slm::vec4 color;
-   };
-   
-   GLuint mVertexBuffer;
-   GLuint mTexVertexBuffer;
-   GLuint mPrimitiveBuffer;
-   ProgramInfo mProgram;
-   LineProgramInfo mLineProgram;
-   
-   GLuint mLineVertexBuffer;
-   
    slm::mat4 mProjectionMatrix;
    slm::mat4 mModelMatrix;
    slm::mat4 mViewMatrix;
@@ -2285,11 +1347,11 @@ public:
    
    struct LoadedTexture
    {
-      GLuint texID;
+      int32_t texID;
       uint32_t bmpFlags;
       
       LoadedTexture() {;}
-      LoadedTexture(GLuint tid, uint32_t bf) : texID(tid), bmpFlags(bf) {;}
+      LoadedTexture(int32_t tid, uint32_t bf) : texID(tid), bmpFlags(bf) {;}
    };
    
    struct ActiveMaterial
@@ -2348,150 +1410,15 @@ public:
    
    void initRender()
    {
-      mProgram = buildProgram();
-      mLineProgram = buildLineProgram();
       mLightColor = slm::vec4(1,1,1,1);
       mLightPos = slm::vec3(0,2, 2);
       
-      glGenBuffers(1, &mLineVertexBuffer);
-      glBindBuffer(GL_ARRAY_BUFFER, mLineVertexBuffer);
-      glBufferData(GL_ARRAY_BUFFER, 6 * kLineVertSize, NULL, GL_STREAM_DRAW);
-      
-      GLuint VertexArrayID;
-      glGenVertexArrays(1, &VertexArrayID);
-      glBindVertexArray(VertexArrayID);
+      // TODO
    }
    
    void clearRender()
    {
-      glDeleteProgram(mProgram.programID);
-   }
-   
-   GLuint compileShader(GLuint shaderType, const char* data)
-   {
-      GLuint shader = glCreateShader(shaderType);
-      glShaderSource(shader, 1, &data, NULL);
-      glCompileShader(shader);
-      
-      GLint status;
-      glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-      if (status == GL_FALSE)
-      {
-         GLint infoLogLength;
-         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
-         GLchar *strInfoLog = new GLchar[infoLogLength + 1];
-         glGetShaderInfoLog(shader, infoLogLength, NULL, strInfoLog);
-         fprintf(stderr, "Failed to compile shader(%i)...\n%s", shaderType, strInfoLog);
-         delete[] strInfoLog;
-         return 0;
-      }
-      
-      return shader;
-   }
-   
-   LineProgramInfo buildLineProgram()
-   {
-      LineProgramInfo ret;
-      GLuint shaders[2];
-      
-      shaders[0] = compileShader(GL_VERTEX_SHADER, sLineVertexProgram);
-      shaders[1] = compileShader(GL_FRAGMENT_SHADER, sLineFragmentProgram);
-      
-      ret.programID = glCreateProgram();
-      
-      glAttachShader(ret.programID, shaders[0]);
-      glAttachShader(ret.programID, shaders[1]);
-      
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position, "aPosition");
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position_Normals, "aNormal");
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position_Color, "aColor0");
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position_Next, "aNext");
-      
-      glLinkProgram(ret.programID);
-      
-      GLint status = GL_TRUE;
-      glGetProgramiv (ret.programID, GL_LINK_STATUS, &status);
-      if (status == GL_FALSE)
-      {
-         GLint infoLogLength = 0;
-         glGetProgramiv(ret.programID, GL_INFO_LOG_LENGTH, &infoLogLength);
-         
-         if (infoLogLength > 0)
-         {
-            GLchar *strInfoLog = new GLchar[infoLogLength + 1];
-            glGetProgramInfoLog(ret.programID, infoLogLength, NULL, strInfoLog);
-            fprintf(stderr, "Failed to link shader...\n%s\n", strInfoLog);
-            delete[] strInfoLog;
-         }
-         glDeleteProgram(ret.programID);
-         return ret;
-      }
-      
-      glDetachShader(ret.programID, shaders[0]);
-      glDetachShader(ret.programID, shaders[1]);
-      
-      glUseProgram(ret.programID);
-      
-      ret.uniformLocations[kLineUniform_PMatrix] = glGetUniformLocation(ret.programID, "projection");
-      ret.uniformLocations[kLineUniform_MVMatrix] = glGetUniformLocation(ret.programID, "worldMatrix");
-      ret.uniformLocations[kLineUniform_Width] = glGetUniformLocation(ret.programID, "lineWidth");
-      ret.uniformLocations[kLineUniform_ViewportScale] = glGetUniformLocation(ret.programID, "viewportScale");
-      
-      return ret;
-   }
-   
-   ProgramInfo buildProgram()
-   {
-      ProgramInfo ret;
-      GLuint shaders[2];
-      
-      shaders[0] = compileShader(GL_VERTEX_SHADER, sStandardVertexProgram);
-      shaders[1] = compileShader(GL_FRAGMENT_SHADER, sStandardFragmentProgram);
-      
-      ret.programID = glCreateProgram();
-      
-      glAttachShader(ret.programID, shaders[0]);
-      glAttachShader(ret.programID, shaders[1]);
-      
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position, "aPosition");
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position_Normals, "aNormal");
-      glBindAttribLocation(ret.programID, kVertexAttrib_Position_TexCoords, "aTexCoord0");
-      
-      glLinkProgram(ret.programID);
-      
-      GLint status = GL_TRUE;
-      glGetProgramiv (ret.programID, GL_LINK_STATUS, &status);
-      if (status == GL_FALSE)
-      {
-         GLint infoLogLength = 0;
-         glGetProgramiv(ret.programID, GL_INFO_LOG_LENGTH, &infoLogLength);
-         
-         if (infoLogLength > 0)
-         {
-            GLchar *strInfoLog = new GLchar[infoLogLength + 1];
-            glGetProgramInfoLog(ret.programID, infoLogLength, NULL, strInfoLog);
-            
-            fprintf(stderr, "Failed to link shader...\n%s\n", strInfoLog);
-            
-            delete[] strInfoLog;
-         }
-         glDeleteProgram(ret.programID);
-         return ret;
-      }
-      
-      glDetachShader(ret.programID, shaders[0]);
-      glDetachShader(ret.programID, shaders[1]);
-      
-      glUseProgram(ret.programID);
-      
-      ret.uniformLocations[kUniform_MVPMatrix] = glGetUniformLocation(ret.programID, "worldMatrixProjection");
-      ret.uniformLocations[kUniform_MVMatrix] = glGetUniformLocation(ret.programID, "worldMatrix");
-      ret.uniformLocations[kUniform_LightPos] = glGetUniformLocation(ret.programID, "lightPos");
-      ret.uniformLocations[kUniform_LightColor] = glGetUniformLocation(ret.programID, "lightColor");
-      ret.uniformLocations[kUniform_AlphaTestVal] = glGetUniformLocation(ret.programID, "alphaTestF");
-      ret.uniformLocations[kUniform_SamplerID] = glGetUniformLocation(ret.programID, "texture0");
-      
-      return ret;
+      // TODO
    }
    
    // Sequence Handling
@@ -2949,62 +1876,6 @@ public:
       animateNodes();
    }
    
-   inline uint32_t getNextPow2(uint32_t a)
-   {
-      a--;
-      a |= a >> 1;
-      a |= a >> 2;
-      a |= a >> 4;
-      a |= a >> 8;
-      a |= a >> 16;
-      return a + 1;
-   }
-   
-   void copyMipDirect(uint32_t height, uint32_t src_stride, uint32_t dest_stride, uint8_t* data, uint8_t* out_data)
-   {
-      for (int y=0; y<height; y++)
-      {
-         uint8_t *srcPixels = data + (y*src_stride);
-         uint8_t *destPixels = out_data + (y*dest_stride);
-         memcpy(destPixels, srcPixels, src_stride);
-      }
-   }
-   
-   void copyMipRGB(uint32_t width, uint32_t height, uint32_t pad_width, Palette::Data* pal, uint8_t* data, uint8_t* out_data)
-   {
-      for (int y=0; y<height; y++)
-      {
-         uint8_t *srcPixels = data + (y*width);
-         uint8_t *destPixels = out_data + (y*pad_width);
-         for (int x=0; x<width; x++)
-         {
-            uint8_t r,g,b;
-            pal->lookupRGB(srcPixels[x], r,g,b);
-            *destPixels++ = r;
-            *destPixels++ = g;
-            *destPixels++ = b;
-         }
-      }
-   }
-   
-   void copyMipRGBA(uint32_t width, uint32_t height, uint32_t pad_width, Palette::Data* pal, uint8_t* data, uint8_t* out_data, uint32_t clamp_a)
-   {
-      for (int y=0; y<height; y++)
-      {
-         uint8_t *srcPixels = data + (y*width);
-         uint8_t *destPixels = out_data + (y*pad_width);
-         for (int x=0; x<width; x++)
-         {
-            uint8_t r,g,b,a;
-            pal->lookupRGBA(srcPixels[x], r,g,b,a);
-            *destPixels++ = r;
-            *destPixels++ = g;
-            *destPixels++ = b;
-            *destPixels++ = std::min((uint32_t)a * clamp_a, (uint32_t)255);
-         }
-      }
-   }
-   
    bool loadTexture(const char *filename, LoadedTexture& outTexInfo, bool force=false)
    {
       bool genTex = true;
@@ -3024,67 +1895,11 @@ public:
          Bitmap* bmp = new Bitmap();
          if (bmp->read(mem))
          {
-            if (genTex) glGenTextures(1, &outTexInfo.texID);
-            outTexInfo.bmpFlags = bmp->mFlags;
-            
-            uint32_t pow2W = getNextPow2(bmp->mWidth);
-            uint32_t pow2H = getNextPow2(bmp->mHeight);
-            
-            if (bmp->mBitDepth == 8)
+            int32_t texID = GFXLoadTexture(bmp, mPalette);
+            if (texID >= 0)
             {
-               Palette::Data* pal = NULL;
-               
-               if (bmp->mPal)
-                  pal = bmp->mPal->getPaletteByIndex(bmp->mPaletteIndex);
-               else if (mPalette && mPalette->mPalettes.size() > 0)
-                  pal = mPalette->getPaletteByIndex(bmp->mPaletteIndex);
-               else
-               {
-                  delete bmp;
-                  glDeleteTextures(1, &outTexInfo.texID);
-                  assert(false);
-                  return false;
-               }
-               
-               uint8_t* texData;
-               glBindTexture(GL_TEXTURE_2D, outTexInfo.texID);
-               glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-               glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-               
-               if (bmp->mFlags & Bitmap::FLAG_TRANSPARENT)
-               {
-                  texData = new uint8_t[pow2W*pow2H*4];
-                  copyMipRGBA(bmp->mWidth, bmp->mHeight, pow2W*4, pal, bmp->mMips[0], texData, 255);
-                  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pow2W, pow2H, 0, GL_BGRA, GL_UNSIGNED_BYTE, texData);
-               }
-               else if (bmp->mFlags & Bitmap::FLAG_TRANSLUCENT)
-               {
-                  texData = new uint8_t[pow2W*pow2H*4];
-                  copyMipRGBA(bmp->mWidth, bmp->mHeight, pow2W*4, pal, bmp->mMips[0], texData, 1);
-                  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pow2W, pow2H, 0, GL_BGRA, GL_UNSIGNED_BYTE, texData);
-               }
-               else
-               {
-                  texData = new uint8_t[pow2W*pow2H*3];
-                  copyMipRGB(bmp->mWidth, bmp->mHeight, pow2W*3, pal, bmp->mMips[0], texData);
-                  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pow2W, pow2H, 0, GL_BGR, GL_UNSIGNED_BYTE, texData);
-               }
-               
-               delete[] texData;
-            }
-            else if (bmp->mBitDepth == 24)
-            {
-               glBindTexture(GL_TEXTURE_2D, outTexInfo.texID);
-               glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-               glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-               uint8_t* texData = new uint8_t[pow2W*pow2H*3];
-               copyMipDirect(bmp->mHeight, bmp->getStride(bmp->mWidth), pow2W*3, bmp->mMips[0], texData);
-               glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pow2W, pow2H, 0, GL_BGR, GL_UNSIGNED_BYTE, texData);
-               delete[] texData;
-            }
-            else
-            {
-               assert(false);
+               outTexInfo.bmpFlags = bmp->mFlags;
+               outTexInfo.texID = texID;
             }
             
             // Done
@@ -3119,7 +1934,7 @@ public:
    
    void clearTextures()
    {
-      for (auto itr: mLoadedTextures) { glDeleteTextures(1, &itr.second.texID); }
+      for (auto itr: mLoadedTextures) { GFXDeleteTexture(itr.second.texID); }
       mLoadedTextures.clear();
    }
    
@@ -3262,18 +2077,7 @@ public:
       if (vertexBufferSize == 0 || primBufferSize == 0)
          return;
       
-      glGenBuffers(1, &mVertexBuffer);
-      glGenBuffers(1, &mTexVertexBuffer);
-      glGenBuffers(1, &mPrimitiveBuffer);
-      
-      glBindBuffer(GL_ARRAY_BUFFER, mVertexBuffer);
-      glBufferData(GL_ARRAY_BUFFER, bufferVerts.size()*sizeof(slm::vec3), &bufferVerts[0], GL_STATIC_DRAW);
-      
-      glBindBuffer(GL_ARRAY_BUFFER, mTexVertexBuffer);
-      glBufferData(GL_ARRAY_BUFFER, bufferTVerts.size()*sizeof(slm::vec2), &bufferTVerts[0], GL_STATIC_DRAW);
-      
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mPrimitiveBuffer);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER, bufferTris.size()*6, &bufferTris[0], GL_STATIC_DRAW);
+      GFXLoadModelData(0, &bufferVerts[0], &bufferTVerts[0], &bufferTris[0], bufferVerts.size(), bufferTVerts.size(), bufferTris.size()*3);
    }
    
    void clearVertexBuffer()
@@ -3281,9 +2085,7 @@ public:
       if (!initVB)
          return;
       
-      glDeleteBuffers(1, &mVertexBuffer);
-      glDeleteBuffers(1, &mTexVertexBuffer);
-      glDeleteBuffers(1, &mPrimitiveBuffer);
+      GFXLoadModelData(0, NULL, NULL, NULL, 0, 0, 0);
       initVB = false;
    }
    
@@ -3291,10 +2093,8 @@ public:
    
    void updateMVP()
    {
-      slm::mat4 combined = mProjectionMatrix * mViewMatrix * mModelMatrix;
-      glUniformMatrix4fv(mProgram.uniformLocations[kUniform_MVPMatrix], 1, GL_FALSE, combined.begin());
-      combined = mViewMatrix * mModelMatrix;
-      glUniformMatrix4fv(mProgram.uniformLocations[kUniform_MVMatrix], 1, GL_FALSE, combined.begin());
+      GFXSetModelViewProjection(mModelMatrix, mViewMatrix, mProjectionMatrix);
+      GFXSetLightPos(mLightPos, mLightColor);
    }
    
    void setRuntimeDetailNodes(int32_t alwaysNodeId)
@@ -3425,86 +2225,14 @@ public:
    
    void drawLine(slm::vec3 start, slm::vec3 end, slm::vec4 color, float width)
    {
-      glUseProgram(mLineProgram.programID);
-      glDisable(GL_DEPTH_TEST);
-      glDisable(GL_CULL_FACE);
-      
-      glUniformMatrix4fv(mLineProgram.uniformLocations[kLineUniform_PMatrix], 1, GL_FALSE, mProjectionMatrix.begin());
-      slm::mat4 combined = mViewMatrix;// * mModelMatrix;
-      glUniformMatrix4fv(mLineProgram.uniformLocations[kLineUniform_MVMatrix], 1, GL_FALSE, combined.begin());
-      
-      glUniform1f(mLineProgram.uniformLocations[kLineUniform_Width], width);
-      glUniform2f(mLineProgram.uniformLocations[kLineUniform_ViewportScale], 1.0/640.0, 1.0/480.0);
-      
-      glEnableVertexAttribArray(kVertexAttrib_Position);
-      glEnableVertexAttribArray(kVertexAttrib_Position_Normals);
-      glDisableVertexAttribArray(kVertexAttrib_Position_TexCoords);
-      glEnableVertexAttribArray(kVertexAttrib_Position_Color);
-      glEnableVertexAttribArray(kVertexAttrib_Position_Next);
-      
-      glBindBuffer(GL_ARRAY_BUFFER, mLineVertexBuffer);
-      
-      // vc
-      glVertexAttribPointer(kVertexAttrib_Position, 3, GL_FLOAT, GL_FALSE, kLineVertSize, NULL);
-      // nvc
-      glVertexAttribPointer(kVertexAttrib_Position_Next, 3, GL_FLOAT, GL_FALSE, kLineVertSize, ((uint8_t*)NULL)+sizeof(slm::vec3));
-      // n
-      glVertexAttribPointer(kVertexAttrib_Position_Normals, 3, GL_FLOAT, GL_FALSE, kLineVertSize, ((uint8_t*)NULL)+sizeof(slm::vec3)+sizeof(slm::vec3));
-      // col
-      glVertexAttribPointer(kVertexAttrib_Position_Color, 4, GL_FLOAT, GL_FALSE, kLineVertSize, ((uint8_t*)NULL)+sizeof(slm::vec3)+sizeof(slm::vec3)+sizeof(slm::vec3));
-      
-      _LineVert verts[6];
-      verts[0].pos = start;
-      verts[0].nextPos = end;
-      verts[0].normal = slm::vec3(-1,0,0); // b
-      verts[0].color = color;
-      verts[1].pos = start;
-      verts[1].nextPos = end;
-      verts[1].normal = slm::vec3(1,0,0); // t
-      verts[1].color = color;
-      verts[2].pos = end;
-      verts[2].nextPos = start;
-      verts[2].normal = slm::vec3(1,0,0); // t
-      verts[2].color = color;
-      
-      verts[3].pos = end;
-      verts[3].nextPos = start;
-      verts[3].normal = slm::vec3(1,0,0); // t
-      verts[3].color = color;
-      verts[4].pos = end;
-      verts[4].nextPos = start;
-      verts[4].normal = slm::vec3(-1,0,0); // b
-      verts[4].color = color;
-      verts[5].pos = start;
-      verts[5].nextPos = end;
-      verts[5].normal = slm::vec3(1,0,0); // b
-      verts[5].color = color;
-      
-      glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
-      glDrawArrays(GL_TRIANGLES, 0, 6);
+      updateMVP();
+      GFXBeginLinePipelineState();
+      GFXDrawLine(start, end, color, width);
    }
    
    void render()
    {
       determineNodeVisibility();
-      
-      glUseProgram(mProgram.programID);
-      glUniform3fv(mProgram.uniformLocations[kUniform_LightColor], 1, mLightColor.begin());
-      glUniform3fv(mProgram.uniformLocations[kUniform_LightPos], 1, mLightPos.begin());
-      glUniform1i(mProgram.uniformLocations[kUniform_SamplerID], 0);
-      glUniform1f(mProgram.uniformLocations[kUniform_AlphaTestVal], 1.1f);
-      
-      glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-      glEnableVertexAttribArray(kVertexAttrib_Position);
-      glEnableVertexAttribArray(kVertexAttrib_Position_Normals);
-      glEnableVertexAttribArray(kVertexAttrib_Position_TexCoords);
-      glDisableVertexAttribArray(kVertexAttrib_Position_Color);
-      glDisableVertexAttribArray(kVertexAttrib_Position_Next);
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mPrimitiveBuffer);
-      glEnable(GL_CULL_FACE);
-      glFrontFace(GL_CW);
-      glEnable(GL_DEPTH_TEST);
-      glDepthFunc(GL_LESS);
       
       if (mAlwaysNode > 0)
       {
@@ -3564,13 +2292,9 @@ public:
          updateMVP();
          
          uint32_t ofsVerts = mesh->mFixedFrameOffsets[runtimeInfo->mFrame];
-         uint32_t ofsTexVerts = runtimeMeshInfo->mRealTexVertsPerFrame * runtimeInfo->mTexFrame * sizeof(slm::vec2);
+         uint32_t ofsTexVerts = runtimeMeshInfo->mRealTexVertsPerFrame * runtimeInfo->mTexFrame;
          
-         glBindBuffer(GL_ARRAY_BUFFER, mVertexBuffer);
-         glVertexAttribPointer(kVertexAttrib_Position, 3, GL_FLOAT, GL_FALSE, vertStride, NULL);
-         glVertexAttribPointer(kVertexAttrib_Position_Normals, 3, GL_FLOAT, GL_FALSE, vertStride, ((uint8_t*)NULL)+sizeof(slm::vec3));
-         glBindBuffer(GL_ARRAY_BUFFER, mTexVertexBuffer);
-         glVertexAttribPointer(kVertexAttrib_Position_TexCoords, 2, GL_FLOAT, GL_FALSE, sizeof(slm::vec2), ((uint8_t*)NULL)+ofsTexVerts);
+         GFXSetModelVerts(0, ofsVerts, ofsTexVerts);
          
          for (CelAnimMesh::Prim& prim: runtimeMeshInfo->mPrims)
          {
@@ -3581,42 +2305,31 @@ public:
             if (matIdx > mActiveMaterials.size())
                matIdx = 0;
             
-            glBindTexture(GL_TEXTURE_2D, mActiveMaterials[matIdx].tex.texID);
-            glDisable(GL_BLEND);
-            
             if (mActiveMaterials[matIdx].tex.bmpFlags &Bitmap::FLAG_TRANSPARENT)
             {
-               glUniform1f(mProgram.uniformLocations[kUniform_AlphaTestVal], 0.65f);
+               GFXBeginModelPipelineState(ModelPipeline_TranslucentBlend, mActiveMaterials[matIdx].tex.texID, 0.65f);
             }
-            
-            if (mActiveMaterials[matIdx].tex.bmpFlags & (Bitmap::FLAG_TRANSLUCENT | Bitmap::FLAG_ADDITIVE | Bitmap::FLAG_SUBTRACTIVE))
+            else if (mActiveMaterials[matIdx].tex.bmpFlags & (Bitmap::FLAG_TRANSLUCENT | Bitmap::FLAG_ADDITIVE | Bitmap::FLAG_SUBTRACTIVE))
             {
-               glEnable(GL_BLEND);
-               glBlendEquation(GL_FUNC_ADD);
                if (mActiveMaterials[matIdx].tex.bmpFlags & Bitmap::FLAG_ADDITIVE)
                {
-                  glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                  GFXBeginModelPipelineState(ModelPipeline_AdditiveBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
                }
                else if (mActiveMaterials[matIdx].tex.bmpFlags & Bitmap::FLAG_SUBTRACTIVE)
                {
-                  glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+                  GFXBeginModelPipelineState(ModelPipeline_SubtractiveBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
                }
                else
                {
-                  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                  GFXBeginModelPipelineState(ModelPipeline_TranslucentBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
                }
             }
             else
             {
-               glBlendFunc(GL_ONE, GL_ZERO);
+               GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, mActiveMaterials[matIdx].tex.texID, 1.1f);
             }
             
-            glDrawRangeElementsBaseVertex(GL_TRIANGLES, 0, prim.numVerts, prim.numInds, GL_UNSIGNED_SHORT, ((uint16_t*)NULL) + prim.startInds, prim.startVerts + ofsVerts);
-            
-            if (mActiveMaterials[matIdx].tex.bmpFlags &Bitmap::FLAG_TRANSPARENT)
-            {
-               glUniform1f(mProgram.uniformLocations[kUniform_AlphaTestVal], 1.1f);
-            }
+            GFXDrawModelPrims(prim.numVerts, prim.numInds, prim.startInds, prim.startVerts);
          }
       }
       
@@ -3737,9 +2450,6 @@ public:
    
    void update(float dt)
    {
-      glClearColor(0,1,1,1);
-      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-      
       mViewer.mModelMatrix = slm::rotation_x(xRot) * slm::rotation_y(yRot);
       mViewer.mViewMatrix = slm::mat4(1) * slm::translation(-mViewPos);
       
@@ -3753,10 +2463,11 @@ public:
       mViewer.animateNodes();
       mViewer.render();
       if (mRenderNodes)
+      {
          mViewer.renderNodes(mShape->mDetails[mViewer.mCurrentDetail].rootNode, slm::vec3(0,0,0), mHighlightNodeIdx);
+      }
       
       // Now render gui
-      
       ImGui::Begin("Nodes");
       ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.75);
       nodeTree(0);
@@ -3827,7 +2538,6 @@ public:
       ImGui::Checkbox("Render Nodes", &mRenderNodes);
       ImGui::End();
       
-      
       // Update state changed by gui
       for (int i=0; i<mNextSequence.size(); i++)
       {
@@ -3892,24 +2602,77 @@ int main(int argc, const char * argv[])
       return (1);
    }
    
-   window = SDL_CreateWindow( "DTS Viewer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 800, 600, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE );
+   window = SDL_CreateWindow( "DTS Viewer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1024, 700, SDL_WINDOW_SHOWN |
+#ifdef USE_METAL
+    //  SDL_WINDOW_RESIZABLE | // Not implemented properly in SDL
+      SDL_WINDOW_ALLOW_HIGHDPI
+#else
+      SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+#endif
+      );
+   
    if( window == NULL ) {
       printf( "Window could not be created! SDL_Error: %s\n", SDL_GetError() );
       return (1);
    }
    
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-   SDL_GL_SetSwapInterval(1);
-   
-   SDL_GLContext mainContext = SDL_GL_CreateContext(window);
-   
-   if (gl3wInit()) {
-      fprintf(stderr, "failed to initialize OpenGL\n");
-      return -1;
+   if (!GFXSetup(window))
+   {
+      return 1;
    }
+   
+#if 0
+   uint32_t lastTicks = SDL_GetTicks();
+   bool running = true;
+   slm::vec3 testPos(0,0,0);
+   slm::vec3 deltaMovement(0,0,0);
+   while (running)
+   {
+      uint32_t curTicks = SDL_GetTicks();
+      float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
+      lastTicks = curTicks;
+      
+      int w, h;
+      SDL_GetWindowSize(window, &w, &h);
+      
+      testPos += deltaMovement * dt * 100;
+      
+      //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 0);
+      //SDL_RenderClear(renderer);
+      //SDL_RenderCopy(renderer, bitmapTex, NULL, NULL);
+      
+      GFXTestRender(testPos);
+      
+      //SDL_RenderPresent(renderer);
+      
+      SDL_Event event;
+      while (SDL_PollEvent(&event))
+      {
+         switch (event.type)
+         {
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
+            {
+               switch (event.key.keysym.sym)
+               {
+                  case SDLK_LEFT:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_RIGHT: deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_UP:    deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_DOWN:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_q:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_e:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
+               }
+            }
+               break;
+               
+            case SDL_QUIT:
+               running = false;
+               break;
+         }
+      }
+   }
+#endif
+#if 1
    
    ShapeViewerController controller(window);
    
@@ -3937,13 +2700,6 @@ int main(int argc, const char * argv[])
       return -1;
    }
    
-   // Init gui
-   IMGUI_CHECKVERSION();
-   ImGui::CreateContext();
-   ImGuiIO& io = ImGui::GetIO(); (void)io;
-   
-   ImGui_ImplSDL2_InitForOpenGL(window, &mainContext);
-   ImGui_ImplOpenGL3_Init("#version 150");
    ImGui::StyleColorsDark();
    
    SDL_Event event;
@@ -3977,6 +2733,7 @@ int main(int argc, const char * argv[])
    while (running)
    {
       uint32_t curTicks = SDL_GetTicks();
+      uint32_t oldLastTicks = lastTicks;
       float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
       lastTicks = curTicks;
       controller.mViewPos += deltaMovement * dt;
@@ -3984,11 +2741,7 @@ int main(int argc, const char * argv[])
       int w, h;
       SDL_GetWindowSize(window, &w, &h);
       
-      glViewport(0,0,w,h);
-      
-      ImGui_ImplOpenGL3_NewFrame();
-      ImGui_ImplSDL2_NewFrame(window);
-      ImGui::NewFrame();
+      //glViewport(0,0,w,h);
       
       if (oldSelectedVolumeIdx != selectedVolumeIdx)
       {
@@ -4020,6 +2773,14 @@ int main(int argc, const char * argv[])
       {
          switch (event.type)
          {
+            case SDL_WINDOWEVENT:
+            {
+               if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                   event.window.event == SDL_WINDOWEVENT_RESIZED)
+                  GFXHandleResize();
+               break;
+            }
+               
             case SDL_KEYDOWN:
             case SDL_KEYUP:
             {
@@ -4041,19 +2802,23 @@ int main(int argc, const char * argv[])
          }
       }
       
-      controller.update(dt);
-      
-      ImGui::Begin("Browse");
-      ImGui::Columns(2);
-      ImGui::ListBox("##bvols", &selectedVolumeIdx, &cVolumeList[0], cVolumeList.size());
-      ImGui::NextColumn();
-      ImGui::ListBox("##bfiles", &selectedFileIdx, &cFileList[0], cFileList.size());
-      
-      ImGui::End();
-      
-      ImGui::Render();
-      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-      SDL_GL_SwapWindow(window);
+      if (GFXBeginFrame())
+      {
+         controller.update(dt);
+         
+         ImGui::Begin("Browse");
+         ImGui::Columns(2);
+         ImGui::ListBox("##bvols", &selectedVolumeIdx, &cVolumeList[0], cVolumeList.size());
+         ImGui::NextColumn();
+         ImGui::ListBox("##bfiles", &selectedFileIdx, &cFileList[0], cFileList.size());
+         ImGui::End();
+         
+         GFXEndFrame();
+      }
+      else
+      {
+         lastTicks = oldLastTicks;
+      }
       
       uint32_t endTicks = SDL_GetTicks();
       if (endTicks - lastTicks < tickMS)
@@ -4061,6 +2826,8 @@ int main(int argc, const char * argv[])
          SDL_Delay(tickMS - (endTicks - lastTicks));
       }
    }
+   
+#endif
    
    SDL_DestroyWindow( window );
    SDL_Quit();
