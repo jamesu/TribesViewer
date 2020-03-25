@@ -2,11 +2,11 @@
 
 ## What is it?
 
-TribesViewer is a simple viewer for Tribes 1 and Starsiege ".dts" models.
+TribesViewer is a simple viewer for Tribes 1 and Starsiege ".dts" models, with additional support for loading `.dis` interior files.
 
 ## Sounds great, how do i use it?
 
-Assuming you have compiled the executable, you need to supply a list of paths or volumes in which the "dts" and associated asset files are located, in addition to a palette ".ppl" file to use. The final parameter should then be the model file you want to view to start off with. e.g.
+Assuming you have compiled the executable, you need to supply a list of paths or volumes in which the "dts"/"dis" and associated asset files are located, in addition to a palette ".ppl" file to use. The final parameter should then be the model file you want to view to start off with. e.g.
 
 
 	./TribesViewer . Entities.vol ice.day.ppl harmor.dts

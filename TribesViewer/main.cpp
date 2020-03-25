@@ -221,6 +221,11 @@ public:
          return false;
       }
       
+      for (Entry& e : mFiles)
+      {
+         printf("%s\n", e.getFilename(mStringData));
+      }
+      
       return true;
    }
    
@@ -345,37 +350,77 @@ public:
       return obj;
    }
    
-   void enumerateVolume(uint32_t idx, std::vector<EnumEntry> &outList, std::string *restrictExt)
+   template<class T> T* openTypedObject(const char *filename, int32_t forceMount=-1)
+   {
+      T* obj = NULL;
+      MemRStream mem(0, NULL);
+      if (openFile(filename, mem, forceMount))
+      {
+         DarkstarPersistObject *dObj = DarkstarPersistObject::createFromStream(mem);
+         if (dObj)
+         {
+            obj = dynamic_cast<T*>(dObj);
+            if (!obj)
+               delete dObj;
+         }
+      }
+      return obj;
+      
+   }
+   
+   void enumerateVolume(uint32_t idx, std::vector<EnumEntry> &outList, std::vector<std::string> *restrictExts)
    {
       for (Volume::Entry &e : mVolumes[idx]->mFiles)
       {
-         if (restrictExt)
+         if (restrictExts)
          {
             std::string ext = fs::extension(e.getFilename(mVolumes[idx]->mStringData));
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext != *restrictExt)
+            
+            bool found = false;
+            for (std::string &restrictExt : *restrictExts)
+            {
+               if (ext == restrictExt)
+               {
+                  found = true;
+                  break;
+               }
+            }
+            
+            if (!found)
                continue;
          }
          outList.emplace_back(EnumEntry(e.getFilename(mVolumes[idx]->mStringData), mPaths.size()+idx));
       }
    }
    
-   void enumeratePath(uint32_t idx, std::vector<EnumEntry> &outList, std::string *restrictExt)
+   void enumeratePath(uint32_t idx, std::vector<EnumEntry> &outList, std::vector<std::string> *restrictExts)
    {
       for (fs::directory_entry &itr : fs::directory_iterator(mPaths[idx]))
       {
-         if (restrictExt)
+         if (restrictExts)
          {
             std::string ext = fs::extension(itr.path().filename().c_str());
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext != *restrictExt)
+            
+            bool found = false;
+            for (std::string &restrictExt : *restrictExts)
+            {
+               if (ext == restrictExt)
+               {
+                  found = true;
+                  break;
+               }
+            }
+            
+            if (!found)
                continue;
          }
          outList.emplace_back(EnumEntry(itr.path().filename().c_str(), idx));
       }
    }
    
-   void enumerateFiles(std::vector<EnumEntry> &outList, int restrictIdx=-1, std::string *restrictExt=NULL)
+   void enumerateFiles(std::vector<EnumEntry> &outList, int restrictIdx=-1, std::vector<std::string> *restrictExt=NULL)
    {
       for (int i=0; i<mPaths.size(); i++)
       {
@@ -745,6 +790,312 @@ public:
       
       return true;
    }
+};
+
+class InteriorLight;
+class InteriorGeom;
+
+class InteriorGeom : public DarkstarPersistObject
+{
+public:
+   enum
+   {
+      LowDetail = 0x1
+   };
+   
+   enum PVSFlags
+   {
+      OutsideZMax = 0x4,
+      OutsideYMax = 0x8,
+      OutsideXMax = 0x10,
+      OutsideZMin = 0x20,
+      OutsideYMin = 0x40,
+      OutsideXMin = 0x80,
+      
+      OutsideMin = OutsideZMin | OutsideYMin | OutsideXMin,
+      OutsideMax = OutsideZMax | OutsideYMax | OutsideXMax,
+      OutsideMask = OutsideMin | OutsideMax
+   };
+   
+   struct Vertex
+   {
+      uint16_t pIdx;
+      uint16_t tIdx;
+   };
+   
+   struct PlaneF
+   {
+      float x,y,z,d;
+   };
+   
+   struct BSPNode
+   {
+      uint16_t planeIdx;
+      int16_t front;
+      int16_t back;
+      int16_t fill;
+   };
+   
+   struct BSPLeafSolid
+   {
+      uint32_t surfIdx;
+      uint32_t planeIdx;
+      uint16_t numSurfaces;
+      uint16_t numPlanes;
+   };
+   
+   struct BSPLeafEmpty
+   {
+      enum
+      {
+         External = 0x1,
+         PVSMask = 0xFFFE,
+         PVSShift = 0x1
+      };
+      
+      uint16_t flags; // incl pvs bits
+      uint16_t numSurfs;
+      uint32_t pvsIdx;
+      uint32_t surfIdx;
+      uint32_t planeIdx;
+      slm::vec3 mMinBounds;
+      slm::vec3 mMaxBounds;
+      uint16_t numPlanes;
+   };
+   
+   struct Surface
+   {
+      enum
+      {
+         Material = 0x0,
+         Link = 0x1,
+         TextureBits = 0x1E,
+         TextureShift = 0x1,
+         AmbientLit = 0x20,
+         OutsideVis = 0x40,
+         IsFront = 0x80
+      };
+      
+      uint8_t flags;       // 2
+      uint8_t materials;   // 3
+      uint8_t tsX,tsY;     // 4
+      uint8_t toX,toY;     // 6
+      uint16_t planeIdx;   // 8
+      uint32_t vtxIdx;     // 10
+      uint32_t pointIdx;   // 14
+      uint8_t numVerts;    // 15
+      uint8_t numPoints;   // 16
+   };
+   
+   float mTextureScale;
+   slm::vec3 mMinBounds;
+   slm::vec3 mMaxBounds;
+   int32_t mHighestMip;
+   uint32_t mFlags;
+   
+   std::vector<Surface> mSurfaces;
+   std::vector<BSPNode> mBSPNodes;
+   std::vector<BSPLeafSolid> mSolidLeafs;
+   std::vector<BSPLeafEmpty> mEmptyLeafs;
+   std::vector<uint8_t> mPVSBits;
+   std::vector<Vertex> mVerts;
+   std::vector<slm::vec3> mPoint3List;
+   std::vector<slm::vec2> mPoint2List;
+   std::vector<PlaneF> mPlanes;
+   
+   InteriorGeom()
+   {
+   }
+   
+   virtual ~InteriorGeom()
+   {
+   }
+   
+   bool read(MemRStream &stream, int version)
+   {
+      uint32_t buildId=0;
+      float texScale=0;
+      
+      assert(version == 7);
+      
+      stream.read(buildId);
+      stream.read(mTextureScale);
+      stream.read(mMinBounds);
+      stream.read(mMaxBounds);
+      
+      uint32_t num=0;
+      stream.read(num);
+      mSurfaces.resize(num);
+      stream.read(num);
+      mBSPNodes.resize(num);
+      stream.read(num);
+      mSolidLeafs.resize(num);
+      stream.read(num);
+      mEmptyLeafs.resize(num);
+      stream.read(num);
+      mPVSBits.resize(num);
+      stream.read(num);
+      mVerts.resize(num);
+      stream.read(num);
+      mPoint3List.resize(num);
+      stream.read(num);
+      mPoint2List.resize(num);
+      stream.read(num);
+      mPlanes.resize(num);
+      
+      stream.read(mSurfaces.size() * sizeof(Surface), &mSurfaces[0]);
+      stream.read(mBSPNodes.size() * sizeof(BSPNode), &mBSPNodes[0]);
+      stream.read(mSolidLeafs.size() * sizeof(BSPLeafSolid), &mSolidLeafs[0]);
+      stream.read(mEmptyLeafs.size() * sizeof(BSPLeafEmpty), &mEmptyLeafs[0]);
+      stream.read(mPVSBits.size() * sizeof(uint8_t), &mPVSBits[0]);
+      stream.read(mVerts.size() * sizeof(Vertex), &mVerts[0]);
+      stream.read(mPoint3List.size() * sizeof(slm::vec3), &mPoint3List[0]);
+      stream.read(mPoint2List.size() * sizeof(slm::vec2), &mPoint2List[0]);
+      stream.read(mPlanes.size() * sizeof(PlaneF), &mPlanes[0]);
+      
+      stream.read(mHighestMip);
+      stream.read(mFlags);
+      
+      // NOTE: original code pushes points inside bounding box by 0.0125f if they are on bounding box. Shouldn't be needed here but might be
+      // relevant for collision.
+      
+      return true;
+   }
+};
+
+class Interior
+{
+public:
+   enum
+   {
+      IDENT_ITR = 1934775369
+   };
+   
+   struct State
+   {
+      uint32_t stateNameIdx;
+      uint32_t lodIdx;
+      uint32_t numLods;
+   };
+   
+   struct Lod
+   {
+      uint32_t minPixels;
+      uint32_t geomNameIdx;
+      uint32_t lightStateIdx;
+      uint32_t linkableFaces;
+   };
+   
+   std::vector<State> mStates;
+   std::vector<Lod> mLods;
+   std::vector<uint32_t> mLightStates;
+   std::vector<uint32_t> mLodLightStates;
+   char* mNames;
+   uint32_t mMaterialListNameIdx;
+   bool mLinkedInterior;
+   slm::vec3 mCenter;
+   float mRadius;
+   
+   std::vector<InteriorLight*> mLightStateInstances;
+   std::vector<InteriorLight*> mLodLightStateInstances;
+   
+   std::vector<InteriorGeom*> mLodGeomInstances;
+   
+   MaterialList* mMaterials;
+   
+   const char* getFilename(uint32_t nameIndex)
+   {
+      return mNames+nameIndex;
+   }
+   
+   Interior()
+   {
+      mNames = NULL;
+   }
+   
+   ~Interior()
+   {
+      if (mNames)
+         delete[] mNames;
+      if (mMaterials)
+         delete mMaterials;
+   }
+   
+   bool read(MemRStream &mem)
+   {
+      IFFBlock block;
+      uint32_t num;
+      
+      mem.read(block);
+      if (block.ident != IDENT_ITR)
+      {
+         return false;
+      }
+      
+      num = 0;
+      mem.read(num);
+      
+      assert(num == 3); // version
+      
+      num = 0;
+      mem.read(num);
+      mStates.resize(num);
+      if (!mem.read(sizeof(State) * num, &mStates[0]))
+         return false;
+      
+      num = 0;
+      mem.read(num);
+      mLods.resize(num);
+      if (!mem.read(sizeof(Lod) * num, &mLods[0]))
+         return false;
+      
+      num = 0;
+      mem.read(num);
+      mLodLightStates.resize(num);
+      if (!mem.read(sizeof(uint32_t) * num, &mLodLightStates[0]))
+         return false;
+      
+      num = 0;
+      mem.read(num);
+      mLightStates.resize(num);
+      if (!mem.read(sizeof(uint32_t) * num, &mLightStates[0]))
+         return false;
+      
+      num = 0;
+      mem.read(num);
+      mNames = new char[num];
+      if (!mem.read(num, mNames))
+         return false;
+      
+      mem.read(mMaterialListNameIdx);
+      mem.read(mLinkedInterior);
+      
+      return true;
+   }
+   
+   bool loadResources(ResManager* res)
+   {
+      mMaterials = res->openTypedObject<MaterialList>(getFilename(mMaterialListNameIdx));
+      if (!mMaterials)
+         return false;
+      
+      mLodGeomInstances.resize(mLods.size());
+      
+      for (int i=0; i<mLods.size(); i++)
+      {
+         mLodGeomInstances[i] = res->openTypedObject<InteriorGeom>(getFilename(mLods[i].geomNameIdx));
+      }
+      
+      if (mLodGeomInstances.size() > 0)
+      {
+         mCenter = mLodGeomInstances[0]->mMinBounds + ((mLodGeomInstances[0]->mMaxBounds - mLodGeomInstances[0]->mMinBounds) * 0.5);
+         mRadius = abs(mCenter.x - mLodGeomInstances[0]->mMaxBounds.x);
+      }
+      
+      
+      return true;
+   }
+   
 };
 
 
@@ -1259,9 +1610,141 @@ void DarkstarPersistObject::initStatics()
    registerClass("TS::MaterialList", &_createClass<MaterialList>);
    registerClass("TS::Shape", &_createClass<Shape>);
    registerClass("TS::CelAnimMesh", &_createClass<CelAnimMesh>);
+   registerClass("ITRGeometry", &_createClass<InteriorGeom>);
 }
 
-class ShapeViewer
+
+class GenericViewer
+{
+public:
+   
+   struct LoadedTexture
+   {
+      int32_t texID;
+      uint32_t bmpFlags;
+      uint16_t width, height;
+      
+      LoadedTexture() {;}
+      LoadedTexture(int32_t tid, uint32_t bf) : texID(tid), bmpFlags(bf) {;}
+   };
+   
+   struct ActiveMaterial
+   {
+      LoadedTexture tex;
+   };
+   
+   std::vector<ActiveMaterial> mActiveMaterials;
+   std::unordered_map<std::string, LoadedTexture> mLoadedTextures;
+   
+   ResManager* mResourceManager;
+   Palette* mPalette;
+   MaterialList* mMaterialList;
+   
+   bool initVB;
+   
+   slm::mat4 mProjectionMatrix;
+   slm::mat4 mModelMatrix;
+   slm::mat4 mViewMatrix;
+   
+   slm::vec4 mLightColor;
+   slm::vec3 mLightPos;
+   
+   GenericViewer() : mResourceManager(NULL), mPalette(NULL), mMaterialList(NULL)
+   {
+      
+   }
+   
+   void updateMVP()
+   {
+      GFXSetModelViewProjection(mModelMatrix, mViewMatrix, mProjectionMatrix);
+      GFXSetLightPos(mLightPos, mLightColor);
+   }
+   
+   void initMaterials()
+   {
+      mActiveMaterials.clear();
+      
+      if (!mMaterialList)
+      {
+         assert(false);
+         return;
+      }
+      
+      mActiveMaterials.resize(mMaterialList->mMaterials.size());
+      for (int i=0; i<mMaterialList->mMaterials.size(); i++)
+      {
+         Material& mat = mMaterialList->mMaterials[i];
+         ActiveMaterial& amat = mActiveMaterials[i];
+         loadTexture((const char*)mat.mFilename, amat.tex);
+      }
+   }
+   
+   bool loadTexture(const char *filename, LoadedTexture& outTexInfo, bool force=false)
+   {
+      bool genTex = true;
+      std::string fname = std::string(filename);
+      auto itr = mLoadedTextures.find(fname);
+      if (itr != mLoadedTextures.end())
+      {
+         outTexInfo = itr->second;
+         genTex = false;
+         if (!force) return true;
+      }
+      
+      // Find in resources
+      MemRStream mem(0, NULL);
+      if (mResourceManager->openFile(filename, mem))
+      {
+         Bitmap* bmp = new Bitmap();
+         if (bmp->read(mem))
+         {
+            int32_t texID = GFXLoadTexture(bmp, mPalette);
+            if (texID >= 0)
+            {
+               printf("Loaded texture %s dimensions %ix%i", filename, bmp->mWidth, bmp->mHeight);
+               outTexInfo.bmpFlags = bmp->mFlags;
+               outTexInfo.texID = texID;
+               outTexInfo.width = bmp->mWidth;
+               outTexInfo.height = bmp->mHeight;
+            }
+            
+            // Done
+            mLoadedTextures[fname] = outTexInfo;
+            delete bmp;
+            return true;
+         }
+         delete bmp;
+      }
+      
+      return false;
+   }
+   
+   void clearTextures()
+   {
+      for (auto itr: mLoadedTextures) { GFXDeleteTexture(itr.second.texID); }
+      mLoadedTextures.clear();
+   }
+   
+   bool setPalette(const char *filename)
+   {
+      MemRStream mem(0, NULL);
+      if (mResourceManager->openFile(filename, mem))
+      {
+         Palette* newPal = new Palette();
+         if (newPal->read(mem))
+         {
+            if (mPalette) delete mPalette;
+            mPalette = newPal;
+            clearTextures();
+            if (mMaterialList) initMaterials();
+         }
+      }
+      return false;
+   }
+   
+};
+
+class ShapeViewer : public GenericViewer
 {
 public:
    struct RuntimeMeshInfo
@@ -1319,17 +1802,6 @@ public:
    std::vector<int16_t> mThreadSubsequences; // Subsequence tracks for nodes + objects
    
    Shape* mShape;
-   ResManager* mResourceManager;
-   Palette* mPalette;
-   
-   bool initVB;
-   
-   slm::mat4 mProjectionMatrix;
-   slm::mat4 mModelMatrix;
-   slm::mat4 mViewMatrix;
-   
-   slm::vec4 mLightColor;
-   slm::vec3 mLightPos;
    
    std::vector<slm::mat4> mNodeTransforms; // Current transform list
    std::vector<slm::quat> mActiveRotations; // non-gl xfms
@@ -1345,23 +1817,6 @@ public:
    int32_t mAlwaysNode;
    int32_t mCurrentDetail;
    
-   struct LoadedTexture
-   {
-      int32_t texID;
-      uint32_t bmpFlags;
-      
-      LoadedTexture() {;}
-      LoadedTexture(int32_t tid, uint32_t bf) : texID(tid), bmpFlags(bf) {;}
-   };
-   
-   struct ActiveMaterial
-   {
-      LoadedTexture tex;
-   };
-   
-   std::vector<ActiveMaterial> mActiveMaterials;
-   std::unordered_map<std::string, LoadedTexture> mLoadedTextures;
-   
    Shape::Transform& getTransform(uint32_t i)
    {
       return mShape->mTransforms[i];
@@ -1372,11 +1827,11 @@ public:
       return mShape->mDetails[i];
    }
    
-   ShapeViewer()
+   ShapeViewer(ResManager* res)
    {
       mPalette = NULL;
       mShape = NULL;
-      mResourceManager = new ResManager();
+      mResourceManager = res;
       initVB = false;
    }
    
@@ -1389,7 +1844,6 @@ public:
       clearVertexBuffer();
       clearTextures();
       clearRender();
-      if (mResourceManager) delete mResourceManager;
    }
    
    void clear()
@@ -1406,6 +1860,7 @@ public:
       mThreadSubsequences.clear();
       mActiveMaterials.clear();
       mShape = NULL;
+      mMaterialList = NULL;
    }
    
    void initRender()
@@ -1861,6 +2316,7 @@ public:
       
       setRuntimeDetailNodes(mAlwaysNode);
       
+      mMaterialList = inShape.mMaterials;
       initMaterials();
       
       // Preload vertex buffer
@@ -1874,85 +2330,6 @@ public:
          
       // Setup default pose for nodes
       animateNodes();
-   }
-   
-   bool loadTexture(const char *filename, LoadedTexture& outTexInfo, bool force=false)
-   {
-      bool genTex = true;
-      std::string fname = std::string(filename);
-      auto itr = mLoadedTextures.find(fname);
-      if (itr != mLoadedTextures.end())
-      {
-         outTexInfo = itr->second;
-         genTex = false;
-         if (!force) return true;
-      }
-
-      // Find in resources
-      MemRStream mem(0, NULL);
-      if (mResourceManager->openFile(filename, mem))
-      {
-         Bitmap* bmp = new Bitmap();
-         if (bmp->read(mem))
-         {
-            int32_t texID = GFXLoadTexture(bmp, mPalette);
-            if (texID >= 0)
-            {
-               outTexInfo.bmpFlags = bmp->mFlags;
-               outTexInfo.texID = texID;
-            }
-            
-            // Done
-            mLoadedTextures[fname] = outTexInfo;
-            delete bmp;
-            return true;
-         }
-         delete bmp;
-      }
-      
-      return false;
-   }
-   
-   void initMaterials()
-   {
-      mActiveMaterials.clear();
-      
-      if (!mShape->mMaterials)
-      {
-         assert(false);
-         return;
-      }
-      
-      mActiveMaterials.resize(mShape->mMaterials->mMaterials.size());
-      for (int i=0; i<mShape->mMaterials->mMaterials.size(); i++)
-      {
-         Material& mat = mShape->mMaterials->mMaterials[i];
-         ActiveMaterial& amat = mActiveMaterials[i];
-         loadTexture((const char*)mat.mFilename, amat.tex);
-      }
-   }
-   
-   void clearTextures()
-   {
-      for (auto itr: mLoadedTextures) { GFXDeleteTexture(itr.second.texID); }
-      mLoadedTextures.clear();
-   }
-   
-   bool setPalette(const char *filename)
-   {
-      MemRStream mem(0, NULL);
-      if (mResourceManager->openFile(filename, mem))
-      {
-         Palette* newPal = new Palette();
-         if (newPal->read(mem))
-         {
-            if (mPalette) delete mPalette;
-            mPalette = newPal;
-            clearTextures();
-            if (mShape) initMaterials();
-         }
-      }
-      return false;
    }
    
    void initVertexBuffer()
@@ -2090,12 +2467,6 @@ public:
    }
    
    // Rendering
-   
-   void updateMVP()
-   {
-      GFXSetModelViewProjection(mModelMatrix, mViewMatrix, mProjectionMatrix);
-      GFXSetLightPos(mLightPos, mLightColor);
-   }
    
    void setRuntimeDetailNodes(int32_t alwaysNodeId)
    {
@@ -2366,10 +2737,305 @@ public:
    }
 };
 
-class ShapeViewerController
+class InteriorViewer : public GenericViewer
+{
+public:
+   
+   bool initVB;
+   uint32_t mLodToRender;
+   
+   struct RenderInteriorInfo
+   {
+      InteriorGeom* geom;
+      uint32_t startSurf;
+      uint32_t numSurfs;
+      
+      uint32_t startInd;
+      uint32_t numTris;
+   };
+   
+   std::vector<RenderInteriorInfo> mRenderInfos;
+   
+   struct Triangle
+   {
+      uint16_t i[3];
+      Triangle() {;}
+   };
+   
+   struct RuntimeSurf
+   {
+      RuntimeSurf() : startVert(0), numVerts(0), startInds(0), numInds(0) {;}
+      
+      uint32_t startVert;
+      uint32_t numVerts;
+      uint32_t startInds;
+      uint32_t numInds;
+      uint32_t matIdx;
+   };
+   
+   std::vector<RuntimeSurf> mRuntimeSurfs;
+   std::vector<Interior::State> mStates;
+   
+   InteriorViewer(ResManager* res)
+   {
+      mResourceManager = res;
+      mPalette = NULL;
+      mLodToRender = 0;
+      //mInterior = NULL;
+   }
+   
+   void render()
+   {
+      // Render all surfs for now
+      mLodToRender = mStates[0].lodIdx;
+      
+      const RenderInteriorInfo& toRender = mRenderInfos[mLodToRender];
+   
+      slm::mat4 baseModel = mModelMatrix;
+      slm::mat4 y_up = slm::rotation_x(slm::radians(-90.0f));
+      mModelMatrix = baseModel * y_up;
+      updateMVP();
+      
+      GFXSetModelVerts(0, 0, 0);
+      
+      for (int i=toRender.startSurf; i<toRender.startSurf + toRender.numSurfs; i++)
+      {
+         const RuntimeSurf &surf = mRuntimeSurfs[i];
+         
+         int32_t matIdx = surf.matIdx;
+         if (matIdx < 0)
+            continue;
+         
+         if (matIdx > mActiveMaterials.size())
+            matIdx = 0;
+         
+         if (mActiveMaterials[matIdx].tex.bmpFlags &Bitmap::FLAG_TRANSPARENT)
+         {
+            GFXBeginModelPipelineState(ModelPipeline_TranslucentBlend, mActiveMaterials[matIdx].tex.texID, 0.65f);
+         }
+         else if (mActiveMaterials[matIdx].tex.bmpFlags & (Bitmap::FLAG_TRANSLUCENT | Bitmap::FLAG_ADDITIVE | Bitmap::FLAG_SUBTRACTIVE))
+         {
+            if (mActiveMaterials[matIdx].tex.bmpFlags & Bitmap::FLAG_ADDITIVE)
+            {
+               GFXBeginModelPipelineState(ModelPipeline_AdditiveBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
+            }
+            else if (mActiveMaterials[matIdx].tex.bmpFlags & Bitmap::FLAG_SUBTRACTIVE)
+            {
+               GFXBeginModelPipelineState(ModelPipeline_SubtractiveBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
+            }
+            else
+            {
+               GFXBeginModelPipelineState(ModelPipeline_TranslucentBlend, mActiveMaterials[matIdx].tex.texID, 1.1f);
+            }
+         }
+         else
+         {
+            GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, mActiveMaterials[matIdx].tex.texID, 1.1f);
+         }
+         
+         GFXDrawModelPrims(surf.numVerts, surf.numInds, surf.startInds, surf.startVert);
+      }
+      
+      mModelMatrix = baseModel;
+   }
+   
+   void loadInterior(Interior& inInterior)
+   {
+      inInterior.loadResources(mResourceManager);
+      mRuntimeSurfs.clear();
+      mRenderInfos.clear();
+      mStates = inInterior.mStates;
+      mMaterialList = inInterior.mMaterials;
+      
+      std::vector<slm::vec3> verts;
+      std::vector<slm::vec2> tverts;
+      std::vector<Triangle> tris;
+      RuntimeSurf surf;
+      
+      // Need to load materials before since we need size info from them
+      initMaterials();
+      
+      // textureScaleBits = 4
+      
+      // Prepare surface data
+      for (InteriorGeom* geom : inInterior.mLodGeomInstances)
+      {
+         RenderInteriorInfo info;
+         info.geom = geom;
+         info.startSurf = mRuntimeSurfs.size();
+         info.numSurfs = geom->mSurfaces.size();
+         info.startInd = tris.size()*3;
+         info.numTris = 0;
+         int maxMipLevel = 0;
+         
+         for (InteriorGeom::Surface &isurf : geom->mSurfaces)
+         {
+            InteriorGeom::PlaneF plane = geom->mPlanes[isurf.planeIdx];
+            
+            uint32_t startVert = verts.size()/2;
+            
+            slm::vec3 surfNormal = slm::vec3(plane.x, plane.y, plane.z);
+            surfNormal.normalize();
+            
+            surf.startVert = 0;
+            surf.startInds = tris.size() * 3;
+            surf.numInds = 0;
+            surf.matIdx = isurf.materials;
+            
+            uint16_t lastVert = 0;
+            ActiveMaterial& amat = mActiveMaterials[surf.matIdx];
+            
+            // Tribes offsets and scales texture coords based on these surface params.
+            // The scale value is what size the texture should be from 0...1 (starting from 1), while the offset is
+            // how many texels the texture should be offset by (relative to the size of the loaded texture)
+            slm::vec2 txScale(1,1);
+            slm::vec2 txOffset(0,0);
+            
+            txScale = slm::vec2(((float)(((int)isurf.tsX+1) << maxMipLevel)) / (float)amat.tex.width,
+                                ((float)(((int)isurf.tsY+1) << maxMipLevel)) / (float)amat.tex.height);
+            txOffset = slm::vec2((float)isurf.toX / (float)amat.tex.width,
+                                 (float)isurf.toY / (float)amat.tex.height);
+            
+            // First add all the verts
+            for (int i=(int)isurf.vtxIdx; i<((int)isurf.vtxIdx) + ((int)isurf.numVerts); i++)
+            {
+               InteriorGeom::Vertex& vert = geom->mVerts[i];
+               
+               slm::vec2 tv = geom->mPoint2List[vert.tIdx];
+               tv *= txScale;
+               tv += txOffset;
+               
+               // Add the two new verts
+               verts.push_back(geom->mPoint3List[vert.pIdx]);
+               verts.push_back(surfNormal);
+               tverts.push_back(tv);
+               
+               surf.numVerts++;
+            }
+            
+            // Now add all the indices
+            // Need to insert a triangle fan for each vert starting from the origin
+            for (int i=1; i < ((int)isurf.numVerts)-1; i++)
+            {
+               Triangle t;
+               
+               t.i[0] = startVert;
+               t.i[1] = startVert+i;
+               t.i[2] = startVert+i+1;
+               tris.push_back(t);
+               
+               surf.numInds += 3;
+               info.numTris += 1;
+            }
+            
+            mRuntimeSurfs.push_back(surf);
+         }
+         
+         for (RuntimeSurf &surf : mRuntimeSurfs)
+         {
+            surf.numVerts = verts.size();
+         }
+         
+         mRenderInfos.push_back(info);
+      }
+      
+      assert(verts.size() < 0xFFFF);
+      GFXLoadModelData(0, &verts[0], &tverts[0], &tris[0], verts.size(), tverts.size(), tris.size()*3);
+   }
+   
+   void clear()
+   {
+      clearTextures();
+      mMaterialList = NULL;
+   }
+   
+};
+
+class ViewController
 {
 public:
    slm::vec3 mViewPos;
+   slm::vec3 mCamRot;
+   
+   virtual void update(float dt) = 0;
+   virtual bool isResourceLoaded() = 0;
+};
+
+class InteriorViewerController : public ViewController
+{
+public:
+   InteriorViewer mViewer;
+   SDL_Window* mWindow;
+   float xRot, yRot, mDetailDist;
+   
+   Interior* mInterior;
+   std::string mPaletteName;
+   
+   InteriorViewerController(SDL_Window* window, ResManager* mgr) :
+   mViewer(mgr), mInterior(NULL), mWindow(window)
+   {
+      xRot = 0.0f;
+      yRot = 0.0f;
+      mCamRot = slm::vec3(0,0,0);
+      mDetailDist = 0.0f;
+      mPaletteName = "ice.day.ppl";
+   }
+   
+   ~InteriorViewerController()
+   {
+      if (mInterior)
+         delete mInterior;
+   }
+   
+   bool isResourceLoaded()
+   {
+      return mInterior != NULL;
+   }
+   
+   void loadInterior(const char* filename, int volIdx=-1)
+   {
+      MemRStream rStream(0, NULL);
+      mViewer.clear();
+      if (mInterior)
+         delete mInterior;
+      mInterior = NULL;
+      
+      if (mViewer.mResourceManager->openFile(filename, rStream, volIdx))
+      {
+         Interior* obj = new Interior();
+         if (!obj->read(rStream))
+         {
+            delete obj;
+            return;
+         }
+         
+         mInterior = ((Interior*)obj);
+         mViewer.clear();
+         mViewer.setPalette(mPaletteName.c_str());
+         mViewer.loadInterior(*mInterior);
+         
+         mViewPos = slm::vec3(0, mInterior->mCenter.z, mInterior->mRadius);
+      }
+   }
+   
+   void update(float dt)
+   {
+      mViewer.mModelMatrix = slm::rotation_x(xRot) * slm::rotation_y(yRot);
+      slm::mat4 rotMat = slm::rotation_z(slm::radians(mCamRot.z)) * slm::rotation_y(slm::radians(mCamRot.y)) *  slm::rotation_x(slm::radians(mCamRot.x));
+      rotMat = inverse(rotMat);
+      mViewer.mViewMatrix = slm::mat4(1) * rotMat * slm::translation(-mViewPos);
+      
+      int w, h;
+      SDL_GetWindowSize(mWindow, &w, &h);
+      mViewer.mProjectionMatrix = slm::perspective_fov_rh( slm::radians(90.0), (float)w/(float)h, 0.01f, 10000.0f);
+      
+      mViewer.render();
+   }
+};
+
+class ShapeViewerController : public ViewController
+{
+public:
    ShapeViewer mViewer;
    SDL_Window* mWindow;
    float xRot, yRot, mDetailDist;
@@ -2384,9 +3050,11 @@ public:
    bool mRenderNodes;
    bool mManualThreads;
    
-   ShapeViewerController(SDL_Window* window)
+   ShapeViewerController(SDL_Window* window, ResManager* mgr) :
+   mViewer(mgr)
    {
       mViewPos = slm::vec3(0,0,0);
+      mCamRot = slm::vec3(0,0,0);
       mViewer.initRender();
       mWindow = window;
       xRot = mDetailDist = 0;
@@ -2403,6 +3071,11 @@ public:
    {
       if (mShape)
          delete mShape;
+   }
+   
+   bool isResourceLoaded()
+   {
+      return mShape != NULL;
    }
    
    void updateNextSequence()
@@ -2451,7 +3124,9 @@ public:
    void update(float dt)
    {
       mViewer.mModelMatrix = slm::rotation_x(xRot) * slm::rotation_y(yRot);
-      mViewer.mViewMatrix = slm::mat4(1) * slm::translation(-mViewPos);
+      slm::mat4 rotMat = slm::rotation_z(slm::radians(mCamRot.z)) * slm::rotation_y(slm::radians(mCamRot.y)) *  slm::rotation_x(slm::radians(mCamRot.x));
+      rotMat = inverse(rotMat);
+      mViewer.mViewMatrix = slm::mat4(1) * rotMat * slm::translation(-mViewPos);
       
       int w, h;
       SDL_GetWindowSize(mWindow, &w, &h);
@@ -2626,6 +3301,7 @@ int main(int argc, const char * argv[])
    bool running = true;
    slm::vec3 testPos(0,0,0);
    slm::vec3 deltaMovement(0,0,0);
+   slm::vec3 deltaRot(0,0,0);
    while (running)
    {
       uint32_t curTicks = SDL_GetTicks();
@@ -2655,12 +3331,12 @@ int main(int argc, const char * argv[])
             {
                switch (event.key.keysym.sym)
                {
-                  case SDLK_LEFT:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_RIGHT: deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_UP:    deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_DOWN:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_q:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_e:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_a:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_s: deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_q:    deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_e:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_w:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_d:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
                }
             }
                break;
@@ -2674,7 +3350,10 @@ int main(int argc, const char * argv[])
 #endif
 #if 1
    
-   ShapeViewerController controller(window);
+   ResManager resManager;
+   ShapeViewerController shapeController(window, &resManager);
+   InteriorViewerController interiorController(window, &resManager);
+   ViewController *currentController = &shapeController;
    
    for (int i=1; i<argc; i++)
    {
@@ -2684,19 +3363,29 @@ int main(int argc, const char * argv[])
       std::string ext = fs::extension(path);
       std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
       
-      if (ext == ".dts")
-         controller.loadShape(path);
-      else if (ext == ".vol")
-         controller.mViewer.mResourceManager->addVolume(path);
+      if (ext == ".dts") {
+         shapeController.loadShape(path);
+         currentController = &shapeController;
+      }
+      else if (ext == ".vol" || ext == ".ted")
+         resManager.addVolume(path);
       else if (ext == ".ppl" || ext == ".pal")
-         controller.mPaletteName = path;
+      {
+         shapeController.mPaletteName = path;
+         interiorController.mPaletteName = path;
+      }
+      else if (ext == ".dis")
+      {
+         interiorController.loadInterior(path);
+         currentController = &interiorController;
+      }
       else if (ext == "")
-         controller.mViewer.mResourceManager->mPaths.emplace_back(path);
+         resManager.mPaths.emplace_back(path);
    }
    
-   if (!controller.mShape)
+   if (!currentController->isResourceLoaded())
    {
-      fprintf(stderr, "please specify a starting shape to load\n");
+      fprintf(stderr, "please specify a starting shape or interior to load\n");
       return -1;
    }
    
@@ -2706,13 +3395,16 @@ int main(int argc, const char * argv[])
    bool running = true;
    
    slm::vec3 deltaMovement(0);
+   slm::vec3 deltaRot(0);
    uint32_t lastTicks = SDL_GetTicks();
    
    int selectedFileIdx = -1;
    int selectedVolumeIdx = -1;
    std::vector<ResManager::EnumEntry> fileList;
-   std::string shapeExt = ".dts";
-   controller.mViewer.mResourceManager->enumerateFiles(fileList, selectedVolumeIdx, &shapeExt);
+   std::vector<std::string> restrictExtList;
+   restrictExtList.push_back(".dts");
+   restrictExtList.push_back(".dis");
+   resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
    std::vector<const char*> cFileList;
    std::vector<std::string> sFileList;
    std::vector<const char*> cVolumeList;
@@ -2725,7 +3417,7 @@ int main(int argc, const char * argv[])
    {
       cFileList.push_back(sFileList[i].c_str());
    }
-   controller.mViewer.mResourceManager->enumerateSearchPaths(cVolumeList);
+   resManager.enumerateSearchPaths(cVolumeList);
    
    int oldSelectedVolumeIdx = -1;
    int oldSelectedFileIdx = -1;
@@ -2736,7 +3428,12 @@ int main(int argc, const char * argv[])
       uint32_t oldLastTicks = lastTicks;
       float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
       lastTicks = curTicks;
-      controller.mViewPos += deltaMovement * dt;
+      
+      currentController->mCamRot += deltaRot * dt * 100;
+      slm::mat4 rotMat = slm::rotation_z(slm::radians(currentController->mCamRot.z)) * slm::rotation_y(slm::radians(currentController->mCamRot.y)) *  slm::rotation_x(slm::radians(currentController->mCamRot.x));
+      //rotMat = inverse(rotMat);
+      slm::vec4 forwardVec = rotMat * slm::vec4(deltaMovement, 1);
+      currentController->mViewPos += forwardVec.xyz() * dt;
       
       int w, h;
       SDL_GetWindowSize(window, &w, &h);
@@ -2746,7 +3443,7 @@ int main(int argc, const char * argv[])
       if (oldSelectedVolumeIdx != selectedVolumeIdx)
       {
          fileList.clear();
-         controller.mViewer.mResourceManager->enumerateFiles(fileList, selectedVolumeIdx, &shapeExt);
+         resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
          oldSelectedVolumeIdx = selectedVolumeIdx;
          
          cFileList.clear();
@@ -2765,7 +3462,18 @@ int main(int argc, const char * argv[])
       
       if (oldSelectedFileIdx != selectedFileIdx)
       {
-         controller.loadShape(cFileList[selectedFileIdx], selectedVolumeIdx);
+         std::string ext = fs::extension(cFileList[selectedFileIdx]);
+         
+         if (ext == ".dis")
+         {
+            interiorController.loadInterior(cFileList[selectedFileIdx], selectedVolumeIdx);
+            currentController = &interiorController;
+         }
+         else
+         {
+            shapeController.loadShape(cFileList[selectedFileIdx], selectedVolumeIdx);
+            currentController = &shapeController;
+         }
          oldSelectedFileIdx = selectedFileIdx;
       }
       
@@ -2784,14 +3492,19 @@ int main(int argc, const char * argv[])
             case SDL_KEYDOWN:
             case SDL_KEYUP:
             {
+               slm::vec3 forwardVec = slm::vec3();
                switch (event.key.keysym.sym)
                {
-                  case SDLK_LEFT:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_RIGHT: deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_UP:    deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_DOWN:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_q:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_e:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_a:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_d:  deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_q:  deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_e:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_w:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_s:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_LEFT:  deltaRot.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_RIGHT: deltaRot.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
+                  case SDLK_UP:  deltaRot.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
+                  case SDLK_DOWN: deltaRot.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
                }
             }
                break;
@@ -2804,7 +3517,7 @@ int main(int argc, const char * argv[])
       
       if (GFXBeginFrame())
       {
-         controller.update(dt);
+         currentController->update(dt);
          
          ImGui::Begin("Browse");
          ImGui::Columns(2);

@@ -300,7 +300,7 @@ static const uint32_t TVMaxBuffersInFlight = 3;
    
    MTLSamplerDescriptor *samplerDescriptor = [MTLSamplerDescriptor new];
    samplerDescriptor.minFilter = MTLSamplerMinMagFilterNearest;
-   samplerDescriptor.magFilter = MTLSamplerMinMagFilterLinear;
+   samplerDescriptor.magFilter = MTLSamplerMinMagFilterNearest;
    samplerDescriptor.sAddressMode = MTLSamplerAddressModeRepeat;
    samplerDescriptor.tAddressMode = MTLSamplerAddressModeRepeat;
    samplerDescriptor.normalizedCoordinates = YES;

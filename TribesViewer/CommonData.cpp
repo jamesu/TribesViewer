@@ -147,7 +147,7 @@ bool Palette::read(MemRStream& mem)
      uint8_t version;
      mem.read(version);
      
-     if (version != 3)
+     if (version != 3 && version != 7)
         return false;
      
      uint16_t tmp;

@@ -94,8 +94,10 @@ modelVertexShader(uint vertexID [[vertex_id]],
    matrix_float4x4 xfmMat = uniforms.view_matrix * uniforms.model_matrix;
    
    matrix_float3x3 rotM = matrix_float3x3(xfmMat[0].xyz, xfmMat[1].xyz, xfmMat[2].xyz);
-   vector_float3 normal = normalize(rotM * vector_float3(vertices[vertexID].normal));
-   vector_float3 lightDir = normalize(uniforms.light_pos);
+   matrix_float3x3 lightM = matrix_float3x3(uniforms.model_matrix[0].xyz, uniforms.model_matrix[1].xyz, uniforms.model_matrix[2].xyz);
+   
+   vector_float3 normal = normalize(lightM * vector_float3(vertices[vertexID].normal));
+   vector_float3 lightDir = normalize(float3(0,3,0));//uniforms.light_pos);
    
    float NdotL = max(dot(normal, lightDir), 0.0);
    vector_float4 diffuse = uniforms.light_color;
@@ -105,7 +107,7 @@ modelVertexShader(uint vertexID [[vertex_id]],
    out.clipSpacePosition = xfmMVP * vector_float4(vertices[vertexID].position, 1.0);
    out.uv = texVertices[vertexID].texcoord;
    //out.uv.y = 1.0-out.uv.y;
-   out.color = vector_float4(1,1,1,1);//NdotL * diffuse;
+   out.color = NdotL * diffuse;
    out.color.a = 1.0;
    out.alpha_test = uniforms.alpha_test;
    

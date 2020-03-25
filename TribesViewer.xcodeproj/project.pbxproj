@@ -14,8 +14,6 @@
 		326BD42021112BE3001902BF /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = 326BD41E21112BE3001902BF /* imgui_impl_metal.mm */; };
 		326BD42321134677001902BF /* GLRenderHelper.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 326BD42121134677001902BF /* GLRenderHelper.cpp */; };
 		3274CA0621067B540069A49B /* libSDL2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3274CA0521067B540069A49B /* libSDL2.a */; };
-		328C1D2B20F960E8003A480D /* libboost_filesystem-mt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 328C1D2A20F960E7003A480D /* libboost_filesystem-mt.dylib */; };
-		328C1D2D20F96113003A480D /* libboost_system-mt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 328C1D2C20F96113003A480D /* libboost_system-mt.dylib */; };
 		329FE14220CC9A89000BD9BA /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 329FE14120CC9A89000BD9BA /* AppDelegate.mm */; };
 		329FE14420CC9A8B000BD9BA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 329FE14320CC9A8B000BD9BA /* Assets.xcassets */; };
 		329FE14720CC9A8B000BD9BA /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 329FE14520CC9A8B000BD9BA /* MainMenu.xib */; };
@@ -27,6 +25,8 @@
 		329FE16120CC9CA6000BD9BA /* ForceFeedback.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 329FE16020CC9CA6000BD9BA /* ForceFeedback.framework */; };
 		329FE16320CC9CB9000BD9BA /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 329FE16220CC9CB9000BD9BA /* AudioToolbox.framework */; };
 		329FE16420CC9CD5000BD9BA /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 329FE15E20CC9C9D000BD9BA /* Carbon.framework */; };
+		32B7145022318E220010848A /* libboost_filesystem-mt.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 32B7144F22318E220010848A /* libboost_filesystem-mt.a */; };
+		32B7145222318E560010848A /* libboost_system-mt.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 32B7145122318E560010848A /* libboost_system-mt.a */; };
 		32BF6D7E20F9060800B337B0 /* imgui_impl_sdl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 32BF6D7520F9060800B337B0 /* imgui_impl_sdl.cpp */; };
 		32BF6D7F20F9060800B337B0 /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 32BF6D7C20F9060800B337B0 /* imgui_draw.cpp */; };
 		32BF6D8020F9060800B337B0 /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 32BF6D7D20F9060800B337B0 /* imgui.cpp */; };
@@ -57,8 +57,6 @@
 		326BD42121134677001902BF /* GLRenderHelper.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = GLRenderHelper.cpp; sourceTree = "<group>"; };
 		3274CA0521067B540069A49B /* libSDL2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libSDL2.a; path = mac/libSDL2.a; sourceTree = "<group>"; };
 		327A108B210674B10082E63E /* encodedNormals.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = encodedNormals.h; sourceTree = "<group>"; };
-		328C1D2A20F960E7003A480D /* libboost_filesystem-mt.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libboost_filesystem-mt.dylib"; path = "../../../usr/local/Cellar/boost/1.67.0_1/lib/libboost_filesystem-mt.dylib"; sourceTree = "<group>"; };
-		328C1D2C20F96113003A480D /* libboost_system-mt.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libboost_system-mt.dylib"; path = "../../../usr/local/Cellar/boost/1.67.0_1/lib/libboost_system-mt.dylib"; sourceTree = "<group>"; };
 		329FE13D20CC9A89000BD9BA /* TribesViewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TribesViewer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		329FE14020CC9A89000BD9BA /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		329FE14120CC9A89000BD9BA /* AppDelegate.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AppDelegate.mm; sourceTree = "<group>"; };
@@ -75,6 +73,8 @@
 		329FE15E20CC9C9D000BD9BA /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
 		329FE16020CC9CA6000BD9BA /* ForceFeedback.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ForceFeedback.framework; path = System/Library/Frameworks/ForceFeedback.framework; sourceTree = SDKROOT; };
 		329FE16220CC9CB9000BD9BA /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		32B7144F22318E220010848A /* libboost_filesystem-mt.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = "libboost_filesystem-mt.a"; path = "../../../../usr/local/Cellar/boost/1.68.0_1/lib/libboost_filesystem-mt.a"; sourceTree = "<group>"; };
+		32B7145122318E560010848A /* libboost_system-mt.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = "libboost_system-mt.a"; path = "../../../../usr/local/Cellar/boost/1.68.0_1/lib/libboost_system-mt.a"; sourceTree = "<group>"; };
 		32BF6D7420F9060800B337B0 /* stb_rect_pack.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = stb_rect_pack.h; path = imgui/stb_rect_pack.h; sourceTree = SOURCE_ROOT; };
 		32BF6D7520F9060800B337B0 /* imgui_impl_sdl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_impl_sdl.cpp; path = imgui/imgui_impl_sdl.cpp; sourceTree = SOURCE_ROOT; };
 		32BF6D7620F9060800B337B0 /* imgui_impl_sdl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = imgui_impl_sdl.h; path = imgui/imgui_impl_sdl.h; sourceTree = SOURCE_ROOT; };
@@ -105,11 +105,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				32B7145222318E560010848A /* libboost_system-mt.a in Frameworks */,
 				3274CA0621067B540069A49B /* libSDL2.a in Frameworks */,
-				328C1D2D20F96113003A480D /* libboost_system-mt.dylib in Frameworks */,
-				328C1D2B20F960E8003A480D /* libboost_filesystem-mt.dylib in Frameworks */,
 				32C7820D20D5474900FB6496 /* Cocoa.framework in Frameworks */,
 				32C7820B20D5473800FB6496 /* IOKit.framework in Frameworks */,
+				32B7145022318E220010848A /* libboost_filesystem-mt.a in Frameworks */,
 				3226566920D474B3003F79E2 /* CoreGraphics.framework in Frameworks */,
 				329FE16420CC9CD5000BD9BA /* Carbon.framework in Frameworks */,
 				329FE16320CC9CB9000BD9BA /* AudioToolbox.framework in Frameworks */,
@@ -163,6 +163,8 @@
 		329FE13420CC9A89000BD9BA = {
 			isa = PBXGroup;
 			children = (
+				32B7145122318E560010848A /* libboost_system-mt.a */,
+				32B7144F22318E220010848A /* libboost_filesystem-mt.a */,
 				3274CA0421067A870069A49B /* imgui */,
 				3274CA0221067A670069A49B /* slm */,
 				329FE13F20CC9A89000BD9BA /* TribesViewer */,
@@ -206,8 +208,6 @@
 			isa = PBXGroup;
 			children = (
 				3274CA0521067B540069A49B /* libSDL2.a */,
-				328C1D2C20F96113003A480D /* libboost_system-mt.dylib */,
-				328C1D2A20F960E7003A480D /* libboost_filesystem-mt.dylib */,
 				32C7820C20D5474900FB6496 /* Cocoa.framework */,
 				32C7820A20D5473800FB6496 /* IOKit.framework */,
 				3226566820D474B3003F79E2 /* CoreGraphics.framework */,
@@ -374,6 +374,7 @@
 					"DEBUG=1",
 					"$(inherited)",
 				);
+				"GCC_PREPROCESSOR_DEFINITIONS[arch=*]" = "";
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -451,7 +452,7 @@
 				"GCC_PREPROCESSOR_DEFINITIONS[arch=*]" = (
 					"DEBUG=1",
 					"$(inherited)",
-					"USE_OPENGL=1",
+					"USE_METAL=1",
 				);
 				HEADER_SEARCH_PATHS = (
 					include,
@@ -468,6 +469,7 @@
 					"$(PROJECT_DIR)",
 					/usr/local/Cellar/boost/1.67.0_1/lib,
 					"$(PROJECT_DIR)/mac",
+					/usr/local/Cellar/boost/1.68.0_1/lib,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.mango.DTS-Test";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -499,6 +501,7 @@
 					"$(PROJECT_DIR)",
 					/usr/local/Cellar/boost/1.67.0_1/lib,
 					"$(PROJECT_DIR)/mac",
+					/usr/local/Cellar/boost/1.68.0_1/lib,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.mango.DTS-Test";
 				PRODUCT_NAME = "$(TARGET_NAME)";
