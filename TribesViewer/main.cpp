@@ -21,7 +21,7 @@
 //-----------------------------------------------------------------------------
 
 #include <stdint.h>
-#include "SDL.h"
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <strings.h>
 #include <algorithm>
@@ -33,11 +33,16 @@
 
 #include "imgui.h"
 
+#ifndef PATH_MAX
+#define PATH_MAX        4096  
+#endif
+
 #ifndef NO_BOOST
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
 #else
 #include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 #include "CommonShaderTypes.h"
@@ -48,7 +53,7 @@ static const uint32_t TVMaxBuffersInFlight = 3;
 
 // Run of the mill quaternion interpolator
 slm::quat CompatInterpolate( slm::quat const & q1,
-                           slm::quat const & q2, float t )
+   slm::quat const & q2, float t )
 {
    // calculate the cosine of the angle
    double cosOmega = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w; // i.e. dot
@@ -82,9 +87,9 @@ slm::quat CompatInterpolate( slm::quat const & q1,
    
    // actually do the interpolation
    return slm::quat(float(scale1 * q1.x + scale2 * q2.x),
-                    float(scale1 * q1.y + scale2 * q2.y),
-                    float(scale1 * q1.z + scale2 * q2.z),
-                    float(scale1 * q1.w + scale2 * q2.w));
+    float(scale1 * q1.y + scale2 * q2.y),
+    float(scale1 * q1.z + scale2 * q2.z),
+    float(scale1 * q1.w + scale2 * q2.w));
 }
 
 #include "encodedNormals.h"
@@ -112,19 +117,19 @@ void CompatQuatSetMatrix(const slm::quat rot, slm::mat4 &outMat)
    
    // r,c
    outMat[0] = slm::vec4(1.0f - (yy + zz),
-                         xy - wz,
-                         xz + wy,
-                         0.0f);
+     xy - wz,
+     xz + wy,
+     0.0f);
    
    outMat[1] = slm::vec4(xy + wz,
-                         1.0f - (xx + zz),
-                         yz - wx,
-                         0.0f);
+     1.0f - (xx + zz),
+     yz - wx,
+     0.0f);
    
    outMat[2] = slm::vec4(xz - wy,
-                         yz + wx,
-                         1.0f - (xx + yy),
-                         0.0f);
+     yz + wx,
+     1.0f - (xx + yy),
+     0.0f);
    
    //outMat = slm::transpose(outMat);
    outMat[3] = slm::vec4(0.0f,0.0f,0.0f,1.0f);
@@ -374,7 +379,8 @@ public:
       {
          if (restrictExts)
          {
-            std::string ext = fs::extension(e.getFilename(mVolumes[idx]->mStringData));
+            fs::path filePath = e.getFilename(mVolumes[idx]->mStringData);
+            std::string  ext = filePath.extension();
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             
             bool found = false;
@@ -396,11 +402,12 @@ public:
    
    void enumeratePath(uint32_t idx, std::vector<EnumEntry> &outList, std::vector<std::string> *restrictExts)
    {
-      for (fs::directory_entry &itr : fs::directory_iterator(mPaths[idx]))
+      for (const fs::directory_entry &itr : fs::directory_iterator(mPaths[idx]))
       {
          if (restrictExts)
          {
-            std::string ext = fs::extension(itr.path().filename().c_str());
+            fs::path filePath = itr.path().filename().c_str();
+            std::string  ext = filePath.extension();
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             
             bool found = false;
@@ -1722,7 +1729,7 @@ public:
    void clearTextures()
    {
       for (auto itr: mLoadedTextures) { GFXDeleteTexture(itr.second.texID); }
-      mLoadedTextures.clear();
+         mLoadedTextures.clear();
    }
    
    bool setPalette(const char *filename)
@@ -1838,136 +1845,136 @@ public:
    ~ShapeViewer()
    {
       for (RuntimeMeshInfo* itr : mRuntimeMeshInfos) { delete itr; }
-      for (RuntimeObjectInfo* itr : mRuntimeObjectInfos) { delete itr; }
-      if (mPalette) delete mPalette;
-      if (mShape) delete mShape;
-      clearVertexBuffer();
-      clearTextures();
-      clearRender();
-   }
-   
-   void clear()
-   {
-      clearVertexBuffer();
-      clearTextures();
+         for (RuntimeObjectInfo* itr : mRuntimeObjectInfos) { delete itr; }
+            if (mPalette) delete mPalette;
+         if (mShape) delete mShape;
+         clearVertexBuffer();
+         clearTextures();
+         clearRender();
+      }
       
-      for (RuntimeMeshInfo* itr : mRuntimeMeshInfos) { delete itr; }
-      for (RuntimeObjectInfo* itr : mRuntimeObjectInfos) { delete itr; }
-      mRuntimeObjectInfos.clear();
-      mRuntimeMeshInfos.clear();
-      mNodeTransforms.clear();
-      mThreads.clear();
-      mThreadSubsequences.clear();
-      mActiveMaterials.clear();
-      mShape = NULL;
-      mMaterialList = NULL;
-   }
-   
-   void initRender()
-   {
-      mLightColor = slm::vec4(1,1,1,1);
-      mLightPos = slm::vec3(0,2, 2);
-      
+      void clear()
+      {
+         clearVertexBuffer();
+         clearTextures();
+         
+         for (RuntimeMeshInfo* itr : mRuntimeMeshInfos) { delete itr; }
+            for (RuntimeObjectInfo* itr : mRuntimeObjectInfos) { delete itr; }
+               mRuntimeObjectInfos.clear();
+            mRuntimeMeshInfos.clear();
+            mNodeTransforms.clear();
+            mThreads.clear();
+            mThreadSubsequences.clear();
+            mActiveMaterials.clear();
+            mShape = NULL;
+            mMaterialList = NULL;
+         }
+         
+         void initRender()
+         {
+            mLightColor = slm::vec4(1,1,1,1);
+            mLightPos = slm::vec3(0,2, 2);
+            
       // TODO
-   }
-   
-   void clearRender()
-   {
+         }
+         
+         void clearRender()
+         {
       // TODO
-   }
-   
+         }
+         
    // Sequence Handling
-   
-   inline uint32_t getSubsequenceStride()
-   {
-      return  (mShape->mObjects.size() + mShape->mNodes.size()) * 2;
-   }
-   
-   uint32_t addThread()
-   {
-      ShapeThread thread;
-      thread.startSubsequence = mThreadSubsequences.size();
-      mThreads.push_back(thread);
-      mThreadSubsequences.resize(mThreadSubsequences.size() + getSubsequenceStride());
-      for (uint32_t i=thread.startSubsequence; i<mThreadSubsequences.size(); i++)
-      {
-         mThreadSubsequences[i] = -1;
-      }
-      
-      return mThreads.size()-1;
-   }
-   
-   void setThreadSequence(uint32_t idx, int32_t sequenceId)
-   {
-      ShapeThread &thread = mThreads[idx];
-      thread.sequenceIdx = sequenceId;
-      thread.transitionIdx = -1;
-      thread.pos = 0.0f;
-      thread.state = sequenceId < 0 ? ShapeThread::STOPPED : ShapeThread::PLAYING;
+         
+         inline uint32_t getSubsequenceStride()
+         {
+            return  (mShape->mObjects.size() + mShape->mNodes.size()) * 2;
+         }
+         
+         uint32_t addThread()
+         {
+            ShapeThread thread;
+            thread.startSubsequence = mThreadSubsequences.size();
+            mThreads.push_back(thread);
+            mThreadSubsequences.resize(mThreadSubsequences.size() + getSubsequenceStride());
+            for (uint32_t i=thread.startSubsequence; i<mThreadSubsequences.size(); i++)
+            {
+               mThreadSubsequences[i] = -1;
+            }
+            
+            return mThreads.size()-1;
+         }
+         
+         void setThreadSequence(uint32_t idx, int32_t sequenceId)
+         {
+            ShapeThread &thread = mThreads[idx];
+            thread.sequenceIdx = sequenceId;
+            thread.transitionIdx = -1;
+            thread.pos = 0.0f;
+            thread.state = sequenceId < 0 ? ShapeThread::STOPPED : ShapeThread::PLAYING;
       // Scan through nodes and objects and set subsequence track
-      memset(&mThreadSubsequences[thread.startSubsequence], '\0', sizeof(uint16_t)*getSubsequenceStride());
-      
-      for (int k=0, sz = mShape->mNodes.size(); k<sz; k++)
-      {
-         Shape::Node *itr = &mShape->mNodes[k];
-         mThreadSubsequences[thread.startSubsequence + k] = -1;
-         for (int32_t i=itr->firstSubSequence, endI=itr->firstSubSequence + itr->numSubSequences; i<endI; i++)
-         {
-            if (mShape->mSubSequences[i].sequenceIdx == sequenceId)
+            memset(&mThreadSubsequences[thread.startSubsequence], '\0', sizeof(uint16_t)*getSubsequenceStride());
+            
+            for (int k=0, sz = mShape->mNodes.size(); k<sz; k++)
             {
-               mThreadSubsequences[thread.startSubsequence + k] = i;
-               break;
+               Shape::Node *itr = &mShape->mNodes[k];
+               mThreadSubsequences[thread.startSubsequence + k] = -1;
+               for (int32_t i=itr->firstSubSequence, endI=itr->firstSubSequence + itr->numSubSequences; i<endI; i++)
+               {
+                  if (mShape->mSubSequences[i].sequenceIdx == sequenceId)
+                  {
+                     mThreadSubsequences[thread.startSubsequence + k] = i;
+                     break;
+                  }
+               }
             }
-         }
-      }
-      
-      uint32_t offset = mShape->mNodes.size();
-      for (int k=0, sz = mShape->mObjects.size(); k<sz; k++)
-      {
-         Shape::Object *itr = &mShape->mObjects[k];
-         mThreadSubsequences[thread.startSubsequence + offset + k] = -1;
-         for (int32_t i=itr->firstSubSequence, endI=itr->firstSubSequence + itr->numSubSequences; i<endI; i++)
-         {
-            if (mShape->mSubSequences[i].sequenceIdx == sequenceId)
+            
+            uint32_t offset = mShape->mNodes.size();
+            for (int k=0, sz = mShape->mObjects.size(); k<sz; k++)
             {
-               mThreadSubsequences[thread.startSubsequence + offset + k] = i;
-               break;
+               Shape::Object *itr = &mShape->mObjects[k];
+               mThreadSubsequences[thread.startSubsequence + offset + k] = -1;
+               for (int32_t i=itr->firstSubSequence, endI=itr->firstSubSequence + itr->numSubSequences; i<endI; i++)
+               {
+                  if (mShape->mSubSequences[i].sequenceIdx == sequenceId)
+                  {
+                     mThreadSubsequences[thread.startSubsequence + offset + k] = i;
+                     break;
+                  }
+               }
             }
-         }
-      }
-      
+            
       // Reset obj states
-      for (int i=0; i<mRuntimeObjectInfos.size(); i++)
-      {
-         mRuntimeObjectInfos[i]->mLastKeyframe = -1;
-      }
-   }
-   
-   void removeThread(uint32_t idx)
-   {
-      const uint32_t numSubSeqs = getSubsequenceStride();
-      ShapeThread thread = mThreads[idx];
-      mThreadSubsequences.erase(mThreadSubsequences.begin() + thread.startSubsequence, mThreadSubsequences.begin() + thread.startSubsequence + numSubSeqs);
-      for (uint32_t i = idx+1, sz = mThreads.size(); i<sz; i++)
-      {
-         mThreads[i].startSubsequence -= numSubSeqs;
-      }
-      mThreads.erase(mThreads.begin()+idx);
-   }
-   
-   void advanceThreads(float dt)
-   {
-      for (ShapeThread &thread : mThreads)
-      {
-         if (thread.sequenceIdx == -1 || thread.sequenceIdx >= mShape->mSequences.size())
-            continue;
+            for (int i=0; i<mRuntimeObjectInfos.size(); i++)
+            {
+               mRuntimeObjectInfos[i]->mLastKeyframe = -1;
+            }
+         }
          
-         Shape::Sequence &sequence = mShape->mSequences[thread.sequenceIdx];
-         
-         switch (thread.state)
+         void removeThread(uint32_t idx)
          {
-            case ShapeThread::STOPPED:
-               break;
+            const uint32_t numSubSeqs = getSubsequenceStride();
+            ShapeThread thread = mThreads[idx];
+            mThreadSubsequences.erase(mThreadSubsequences.begin() + thread.startSubsequence, mThreadSubsequences.begin() + thread.startSubsequence + numSubSeqs);
+            for (uint32_t i = idx+1, sz = mThreads.size(); i<sz; i++)
+            {
+               mThreads[i].startSubsequence -= numSubSeqs;
+            }
+            mThreads.erase(mThreads.begin()+idx);
+         }
+         
+         void advanceThreads(float dt)
+         {
+            for (ShapeThread &thread : mThreads)
+            {
+               if (thread.sequenceIdx == -1 || thread.sequenceIdx >= mShape->mSequences.size())
+                  continue;
+               
+               Shape::Sequence &sequence = mShape->mSequences[thread.sequenceIdx];
+               
+               switch (thread.state)
+               {
+               case ShapeThread::STOPPED:
+                  break;
             case ShapeThread::TRANSITIONING: // TODO
                break;
             case ShapeThread::PLAYING_TRANSITION_WAIT: // TODO
@@ -1990,228 +1997,228 @@ public:
                   }
                }
                break;
+            }
          }
-      }
-   }
-   
-   void animateNodes()
-   {
-      if (mAlwaysNode >= 0)
-      {
-         animateNode(mAlwaysNode);
-         animateObjects(mRuntimeDetails[0]);
       }
       
-      if (mCurrentDetail >= 0)
+      void animateNodes()
       {
-         animateNode(getDetail(mCurrentDetail).rootNode);
-         animateObjects(mRuntimeDetails[mCurrentDetail+1]);
-      }
-   }
-   
-   void animateObjects(RuntimeDetailInfo& runtimeDetail)
-   {
-      for (uint32_t i=runtimeDetail.startRenderObject; i<runtimeDetail.startRenderObject+runtimeDetail.numRenderObjects; i++)
-      {
-         uint32_t objIDToRender = mObjectRenderID[i];
-         Shape::Object &info = mShape->mObjects[objIDToRender];
-         RuntimeObjectInfo* runtimeInfo = mRuntimeObjectInfos[objIDToRender];
-         
-         if (runtimeInfo->mLastKeyframe < 0)
+         if (mAlwaysNode >= 0)
          {
-            runtimeInfo->mDraw = (info.flags & Shape::OBJECT_INVISIBLE_DEFAULT) != 0 ? false : true;
-            runtimeInfo->mFrame = 0;
-            runtimeInfo->mTexFrame = 0;
-            runtimeInfo->mLastKeyframe = 0;
+            animateNode(mAlwaysNode);
+            animateObjects(mRuntimeDetails[0]);
          }
          
-         for (int i=0; i<mThreads.size(); i++)
+         if (mCurrentDetail >= 0)
          {
-            Shape::Keyframe kfA;
-            ShapeThread &thread = mThreads[i];
-            if (thread.sequenceIdx == -1 || thread.sequenceIdx >= mShape->mSequences.size() || !thread.enabled)
-               continue;
-            uint32_t startSub = thread.startSubsequence;
-            int16_t subSeqIdx = mThreadSubsequences[startSub + mShape->mNodes.size() + objIDToRender];
-            if (subSeqIdx < 0)
-               continue;
-            if (mShape->mSubSequences.size() == 0)
-               continue;
-            
-            getNearestSubsequenceKeyframe(mShape->mSequences[thread.sequenceIdx],
-                                          mShape->mSubSequences[subSeqIdx],
-                                          runtimeInfo->mDraw,
-                                          &runtimeInfo->mLastKeyframe, thread.pos, kfA);
-            
-            if (kfA.matIndex & Shape::KEYFRAME_VIS_MATTERS)
-               runtimeInfo->mDraw = (kfA.matIndex & Shape::KEYFRAME_VIS) != 0;
-            if (kfA.matIndex & Shape::KEYFRAME_FRAME_MATTERS)
-               runtimeInfo->mFrame = kfA.key;
-            if (kfA.matIndex & Shape::KEYFRAME_MAT_MATTERS)
-               runtimeInfo->mTexFrame = (kfA.matIndex & Shape::KEYFRAME_MAT_MASK);
+            animateNode(getDetail(mCurrentDetail).rootNode);
+            animateObjects(mRuntimeDetails[mCurrentDetail+1]);
          }
       }
-   }
-   
-   void getNearestSubsequenceKeyframe(const Shape::Sequence &seq, const Shape::SubSequence &subSeq, bool lastVis, int32_t *lastKF, float pos, Shape::Keyframe &outA)
-   {
-      int32_t prevIDX=subSeq.firstKeyFrame-1;
-      uint32_t lastFrame=0;
-      uint32_t lastTexFrame=0;
-      uint32_t lastMatters=0;
       
+      void animateObjects(RuntimeDetailInfo& runtimeDetail)
+      {
+         for (uint32_t i=runtimeDetail.startRenderObject; i<runtimeDetail.startRenderObject+runtimeDetail.numRenderObjects; i++)
+         {
+            uint32_t objIDToRender = mObjectRenderID[i];
+            Shape::Object &info = mShape->mObjects[objIDToRender];
+            RuntimeObjectInfo* runtimeInfo = mRuntimeObjectInfos[objIDToRender];
+            
+            if (runtimeInfo->mLastKeyframe < 0)
+            {
+               runtimeInfo->mDraw = (info.flags & Shape::OBJECT_INVISIBLE_DEFAULT) != 0 ? false : true;
+               runtimeInfo->mFrame = 0;
+               runtimeInfo->mTexFrame = 0;
+               runtimeInfo->mLastKeyframe = 0;
+            }
+            
+            for (int i=0; i<mThreads.size(); i++)
+            {
+               Shape::Keyframe kfA;
+               ShapeThread &thread = mThreads[i];
+               if (thread.sequenceIdx == -1 || thread.sequenceIdx >= mShape->mSequences.size() || !thread.enabled)
+                  continue;
+               uint32_t startSub = thread.startSubsequence;
+               int16_t subSeqIdx = mThreadSubsequences[startSub + mShape->mNodes.size() + objIDToRender];
+               if (subSeqIdx < 0)
+                  continue;
+               if (mShape->mSubSequences.size() == 0)
+                  continue;
+               
+               getNearestSubsequenceKeyframe(mShape->mSequences[thread.sequenceIdx],
+                  mShape->mSubSequences[subSeqIdx],
+                  runtimeInfo->mDraw,
+                  &runtimeInfo->mLastKeyframe, thread.pos, kfA);
+               
+               if (kfA.matIndex & Shape::KEYFRAME_VIS_MATTERS)
+                  runtimeInfo->mDraw = (kfA.matIndex & Shape::KEYFRAME_VIS) != 0;
+               if (kfA.matIndex & Shape::KEYFRAME_FRAME_MATTERS)
+                  runtimeInfo->mFrame = kfA.key;
+               if (kfA.matIndex & Shape::KEYFRAME_MAT_MATTERS)
+                  runtimeInfo->mTexFrame = (kfA.matIndex & Shape::KEYFRAME_MAT_MASK);
+            }
+         }
+      }
+      
+      void getNearestSubsequenceKeyframe(const Shape::Sequence &seq, const Shape::SubSequence &subSeq, bool lastVis, int32_t *lastKF, float pos, Shape::Keyframe &outA)
+      {
+         int32_t prevIDX=subSeq.firstKeyFrame-1;
+         uint32_t lastFrame=0;
+         uint32_t lastTexFrame=0;
+         uint32_t lastMatters=0;
+         
       // reset start basis if we've gone backwards
-      if (*lastKF >= subSeq.firstKeyFrame)
-      {
-         const Shape::Keyframe &kf = mShape->mKeyframes[(*lastKF)];
-         if (pos < kf.pos)
-            *lastKF = subSeq.firstKeyFrame;
-      }
-      else
-      {
-         *lastKF = subSeq.firstKeyFrame;
-      }
-      
-      for (uint32_t i=(*lastKF-subSeq.firstKeyFrame); i<subSeq.numKeyFrames; i++)
-      {
-         const Shape::Keyframe &kf = mShape->mKeyframes[subSeq.firstKeyFrame+i];
-         if (kf.pos <= pos + 0.001f)
+         if (*lastKF >= subSeq.firstKeyFrame)
          {
-            prevIDX = subSeq.firstKeyFrame+i;
-            
-            if (kf.matIndex & Shape::KEYFRAME_VIS_MATTERS)
-            {
-               lastMatters |= Shape::KEYFRAME_VIS_MATTERS | Shape::KEYFRAME_VIS;
-            }
-            if (kf.matIndex & Shape::KEYFRAME_FRAME_MATTERS)
-            {
-               lastFrame = (kf.key);
-               lastMatters |= Shape::KEYFRAME_FRAME_MATTERS;
-            }
-            if (kf.matIndex & Shape::KEYFRAME_MAT_MATTERS)
-            {
-               lastTexFrame = (kf.matIndex & Shape::KEYFRAME_MAT_MASK);
-               lastMatters |= Shape::KEYFRAME_MAT_MATTERS;
-            }
-         }
-         else if (kf.pos >= pos - 0.001f)
-         {
-            break;
-         }
-      }
-      
-      outA = mShape->mKeyframes[prevIDX];
-      outA.matIndex = lastTexFrame | lastMatters;
-      outA.key = lastFrame;
-      *lastKF = prevIDX;
-   }
-   
-   void getSubsequenceKeyframes(const Shape::Sequence &seq, const Shape::SubSequence &subSeq, uint32_t nodeIdx, float pos, Shape::Keyframe &outA, Shape::Keyframe &outB, float &outInterpolation)
-   {
-      int32_t prevIDX=subSeq.firstKeyFrame-1;
-      int32_t nextIDX=subSeq.firstKeyFrame+subSeq.numKeyFrames;
-      for (uint32_t i=0; i<subSeq.numKeyFrames; i++)
-      {
-         const Shape::Keyframe &kf = mShape->mKeyframes[subSeq.firstKeyFrame+i];
-         if (kf.pos <= pos + 0.001f)
-         {
-            prevIDX = subSeq.firstKeyFrame+i;
-         }
-         else if (kf.pos >= pos - 0.001f)
-         {
-            nextIDX = subSeq.firstKeyFrame+i;
-            break;
-         }
-      }
-      
-      // Refine and determine interpolation value
-      if (seq.cyclic)
-      {
-         float diff = 0.0f;
-         if (prevIDX < subSeq.firstKeyFrame)
-         {
-            prevIDX = subSeq.firstKeyFrame + subSeq.numKeyFrames-1;
-            diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
-            outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
-         }
-         else if (nextIDX >= subSeq.firstKeyFrame+subSeq.numKeyFrames)
-         {
-            nextIDX = subSeq.firstKeyFrame;
-            diff = (mShape->mKeyframes[nextIDX].pos + 1.0f) - mShape->mKeyframes[prevIDX].pos;
-            outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
-         }
-         
-         if (prevIDX == nextIDX)
-         {
-            outInterpolation = 0.0f;
+            const Shape::Keyframe &kf = mShape->mKeyframes[(*lastKF)];
+            if (pos < kf.pos)
+               *lastKF = subSeq.firstKeyFrame;
          }
          else
          {
-            diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
-            if (std::fpclassify(diff) == FP_ZERO)
+            *lastKF = subSeq.firstKeyFrame;
+         }
+         
+         for (uint32_t i=(*lastKF-subSeq.firstKeyFrame); i<subSeq.numKeyFrames; i++)
+         {
+            const Shape::Keyframe &kf = mShape->mKeyframes[subSeq.firstKeyFrame+i];
+            if (kf.pos <= pos + 0.001f)
             {
-               outInterpolation = std::fpclassify(pos - mShape->mKeyframes[prevIDX].pos) == FP_ZERO ? 0.0f : 1.0f;
+               prevIDX = subSeq.firstKeyFrame+i;
+               
+               if (kf.matIndex & Shape::KEYFRAME_VIS_MATTERS)
+               {
+                  lastMatters |= Shape::KEYFRAME_VIS_MATTERS | Shape::KEYFRAME_VIS;
+               }
+               if (kf.matIndex & Shape::KEYFRAME_FRAME_MATTERS)
+               {
+                  lastFrame = (kf.key);
+                  lastMatters |= Shape::KEYFRAME_FRAME_MATTERS;
+               }
+               if (kf.matIndex & Shape::KEYFRAME_MAT_MATTERS)
+               {
+                  lastTexFrame = (kf.matIndex & Shape::KEYFRAME_MAT_MASK);
+                  lastMatters |= Shape::KEYFRAME_MAT_MATTERS;
+               }
+            }
+            else if (kf.pos >= pos - 0.001f)
+            {
+               break;
+            }
+         }
+         
+         outA = mShape->mKeyframes[prevIDX];
+         outA.matIndex = lastTexFrame | lastMatters;
+         outA.key = lastFrame;
+         *lastKF = prevIDX;
+      }
+      
+      void getSubsequenceKeyframes(const Shape::Sequence &seq, const Shape::SubSequence &subSeq, uint32_t nodeIdx, float pos, Shape::Keyframe &outA, Shape::Keyframe &outB, float &outInterpolation)
+      {
+         int32_t prevIDX=subSeq.firstKeyFrame-1;
+         int32_t nextIDX=subSeq.firstKeyFrame+subSeq.numKeyFrames;
+         for (uint32_t i=0; i<subSeq.numKeyFrames; i++)
+         {
+            const Shape::Keyframe &kf = mShape->mKeyframes[subSeq.firstKeyFrame+i];
+            if (kf.pos <= pos + 0.001f)
+            {
+               prevIDX = subSeq.firstKeyFrame+i;
+            }
+            else if (kf.pos >= pos - 0.001f)
+            {
+               nextIDX = subSeq.firstKeyFrame+i;
+               break;
+            }
+         }
+         
+      // Refine and determine interpolation value
+         if (seq.cyclic)
+         {
+            float diff = 0.0f;
+            if (prevIDX < subSeq.firstKeyFrame)
+            {
+               prevIDX = subSeq.firstKeyFrame + subSeq.numKeyFrames-1;
+               diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
+               outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+            }
+            else if (nextIDX >= subSeq.firstKeyFrame+subSeq.numKeyFrames)
+            {
+               nextIDX = subSeq.firstKeyFrame;
+               diff = (mShape->mKeyframes[nextIDX].pos + 1.0f) - mShape->mKeyframes[prevIDX].pos;
+               outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+            }
+            
+            if (prevIDX == nextIDX)
+            {
+               outInterpolation = 0.0f;
             }
             else
             {
-               outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+               diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
+               if (std::fpclassify(diff) == FP_ZERO)
+               {
+                  outInterpolation = std::fpclassify(pos - mShape->mKeyframes[prevIDX].pos) == FP_ZERO ? 0.0f : 1.0f;
+               }
+               else
+               {
+                  outInterpolation = (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+               }
             }
-         }
-      }
-      else
-      {
-         if (prevIDX < subSeq.firstKeyFrame)
-         {
-            prevIDX = subSeq.firstKeyFrame;
-            outInterpolation = 0.0f;
-         }
-         else if (nextIDX >= subSeq.firstKeyFrame+subSeq.numKeyFrames)
-         {
-            nextIDX = subSeq.firstKeyFrame+subSeq.numKeyFrames-1;
-            outInterpolation = 1.0f;
-         }
-         else if (prevIDX == nextIDX)
-         {
-            outInterpolation = 0.0f;
          }
          else
          {
-            float diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
-            outInterpolation = (diff <= 0) ? 0.0f : (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+            if (prevIDX < subSeq.firstKeyFrame)
+            {
+               prevIDX = subSeq.firstKeyFrame;
+               outInterpolation = 0.0f;
+            }
+            else if (nextIDX >= subSeq.firstKeyFrame+subSeq.numKeyFrames)
+            {
+               nextIDX = subSeq.firstKeyFrame+subSeq.numKeyFrames-1;
+               outInterpolation = 1.0f;
+            }
+            else if (prevIDX == nextIDX)
+            {
+               outInterpolation = 0.0f;
+            }
+            else
+            {
+               float diff = mShape->mKeyframes[nextIDX].pos - mShape->mKeyframes[prevIDX].pos;
+               outInterpolation = (diff <= 0) ? 0.0f : (pos - mShape->mKeyframes[prevIDX].pos) / diff;
+            }
          }
+         
+         assert(prevIDX >= subSeq.firstKeyFrame && prevIDX < subSeq.firstKeyFrame + subSeq.numKeyFrames);
+         assert(nextIDX >= subSeq.firstKeyFrame && nextIDX < subSeq.firstKeyFrame + subSeq.numKeyFrames);
+         
+         outA = mShape->mKeyframes[prevIDX];
+         outB = mShape->mKeyframes[nextIDX];
       }
       
-      assert(prevIDX >= subSeq.firstKeyFrame && prevIDX < subSeq.firstKeyFrame + subSeq.numKeyFrames);
-      assert(nextIDX >= subSeq.firstKeyFrame && nextIDX < subSeq.firstKeyFrame + subSeq.numKeyFrames);
+      slm::mat4 interpolateXfm(const Shape::Transform &xfmA, const Shape::Transform &xfmB, float pos)
+      {
+         slm::quat qa = xfmA.rot.toQuat();
+         slm::quat qb = xfmB.rot.toQuat();
+         
+         slm::quat qc = CompatInterpolate(qa, qb, pos);
+         float invPos = 1.0 - pos;
+         slm::vec3 pc = slm::vec3(xfmA.pos.x * invPos + xfmB.pos.x * pos,
+           xfmA.pos.y * invPos + xfmB.pos.y * pos,
+           xfmA.pos.z * invPos + xfmB.pos.z * pos);
+         
+         slm::mat4 outXfm(1);
+         CompatQuatSetMatrix(qc, outXfm);
+         outXfm[3] = slm::vec4(pc.x, pc.y, pc.z, 1);
+         
+         return outXfm;
+      }
       
-      outA = mShape->mKeyframes[prevIDX];
-      outB = mShape->mKeyframes[nextIDX];
-   }
-   
-   slm::mat4 interpolateXfm(const Shape::Transform &xfmA, const Shape::Transform &xfmB, float pos)
-   {
-      slm::quat qa = xfmA.rot.toQuat();
-      slm::quat qb = xfmB.rot.toQuat();
-      
-      slm::quat qc = CompatInterpolate(qa, qb, pos);
-      float invPos = 1.0 - pos;
-      slm::vec3 pc = slm::vec3(xfmA.pos.x * invPos + xfmB.pos.x * pos,
-                               xfmA.pos.y * invPos + xfmB.pos.y * pos,
-                               xfmA.pos.z * invPos + xfmB.pos.z * pos);
-      
-      slm::mat4 outXfm(1);
-      CompatQuatSetMatrix(qc, outXfm);
-      outXfm[3] = slm::vec4(pc.x, pc.y, pc.z, 1);
-      
-      return outXfm;
-   }
-   
-   void animateNode(uint32_t nodeIdx)
-   {
-      Shape::Node &node = mShape->mNodes[nodeIdx];
-      slm::quat q;
-      slm::mat4 xfmLocal(1);
-      
+      void animateNode(uint32_t nodeIdx)
+      {
+         Shape::Node &node = mShape->mNodes[nodeIdx];
+         slm::quat q;
+         slm::mat4 xfmLocal(1);
+         
       mNodeVisiblity[nodeIdx] &= ~0x2; // clear force vis
       
       // Start with setting the default transform
@@ -2238,7 +2245,7 @@ public:
             float xfmInterpolation = 0.0f;
             
             assert(subSeqIdx >= mShape->mNodes[nodeIdx].firstSubSequence &&
-                   (subSeqIdx < mShape->mNodes[nodeIdx].firstSubSequence + mShape->mNodes[nodeIdx].numSubSequences));
+              (subSeqIdx < mShape->mNodes[nodeIdx].firstSubSequence + mShape->mNodes[nodeIdx].numSubSequences));
             
             getSubsequenceKeyframes(mShape->mSequences[thread.sequenceIdx], mShape->mSubSequences[subSeqIdx], nodeIdx, thread.pos, kfA, kfB, xfmInterpolation);
             
@@ -2327,7 +2334,7 @@ public:
       {
          mRuntimeObjectInfos[i] = new RuntimeObjectInfo();
       }
-         
+      
       // Setup default pose for nodes
       animateNodes();
    }
@@ -2337,7 +2344,7 @@ public:
       clearVertexBuffer();
       
       for (RuntimeMeshInfo* info : mRuntimeMeshInfos) { delete info; }
-      mRuntimeMeshInfos.clear();
+         mRuntimeMeshInfos.clear();
       
       // Construct a buffer consisting of all the verts
       const uint32_t vertStride = sizeof(slm::vec3) + sizeof(slm::vec3);
@@ -2790,7 +2797,7 @@ public:
       mLodToRender = mStates[0].lodIdx;
       
       const RenderInteriorInfo& toRender = mRenderInfos[mLodToRender];
-   
+      
       slm::mat4 baseModel = mModelMatrix;
       slm::mat4 y_up = slm::rotation_x(slm::radians(-90.0f));
       mModelMatrix = baseModel * y_up;
@@ -2892,9 +2899,9 @@ public:
             slm::vec2 txOffset(0,0);
             
             txScale = slm::vec2(((float)(((int)isurf.tsX+1) << maxMipLevel)) / (float)amat.tex.width,
-                                ((float)(((int)isurf.tsY+1) << maxMipLevel)) / (float)amat.tex.height);
+             ((float)(((int)isurf.tsY+1) << maxMipLevel)) / (float)amat.tex.height);
             txOffset = slm::vec2((float)isurf.toX / (float)amat.tex.width,
-                                 (float)isurf.toY / (float)amat.tex.height);
+               (float)isurf.toY / (float)amat.tex.height);
             
             // First add all the verts
             for (int i=(int)isurf.vtxIdx; i<((int)isurf.vtxIdx) + ((int)isurf.numVerts); i++)
@@ -3182,8 +3189,8 @@ public:
          else
          {
             snprintf(buffer, 1024, "seq=%s pos=%f",
-                     thread.sequenceIdx == -1 ? "NULL" : mShape->getName(mShape->mSequences[thread.sequenceIdx].name),
-                     thread.pos);
+               thread.sequenceIdx == -1 ? "NULL" : mShape->getName(mShape->mSequences[thread.sequenceIdx].name),
+               thread.pos);
          }
          
          ImGui::Text(buffer);
@@ -3243,7 +3250,7 @@ public:
       {
          mHighlightNodeIdx = nodeIdx;
       }
-                          
+      
       if (vis)
       {
          for (int32_t i=0; i<info.numChildren; i++)
@@ -3261,10 +3268,80 @@ public:
    
 };
 
+
+static const uint32_t tickMS = 1000.0 / 60;
+
+struct MainState
+{
+   ResManager resManager;
+   ShapeViewerController* shapeController;
+   InteriorViewerController* interiorController;
+   ViewController *currentController;
+
+   //
+   slm::vec3 deltaMovement;
+   slm::vec3 deltaRot;
+   slm::vec3 testPos;
+   uint32_t lastTicks;
+   
+   int selectedFileIdx;
+   int selectedVolumeIdx;
+   std::vector<ResManager::EnumEntry> fileList;
+   std::vector<std::string> restrictExtList;
+   std::vector<const char*> cFileList;
+   std::vector<std::string> sFileList;
+   std::vector<const char*> cVolumeList;
+
+   int oldSelectedVolumeIdx;
+   int oldSelectedFileIdx;
+   //
+
+   int in_argc;
+   const char** in_argv;
+
+   bool isGFXSetup;
+   bool running;
+
+   SDL_Window* window;
+
+   MainState() : shapeController(NULL), interiorController(NULL), currentController(NULL), in_argc(0), isGFXSetup(false)
+   {
+      lastTicks = 0;
+      selectedFileIdx = -1;
+      selectedVolumeIdx = -1;
+      oldSelectedVolumeIdx = -1;
+      oldSelectedFileIdx = -1;
+      running = false;
+      window = NULL;
+
+      testPos = slm::vec3(0);
+   }
+
+   void init(SDL_Window* in_window, int argc, const char** argv)
+   {
+      shapeController = new ShapeViewerController(window, &resManager);
+      interiorController = new InteriorViewerController(window, &resManager);
+      in_argc = argc;
+      in_argv = argv;
+      window = in_window;
+   }
+
+   int boot();
+   int loop();
+
+   int testBoot();
+   int testLoop();
+   
+   void shutdown();
+};
+
+static MainState gMainState;
+
+
 int main(int argc, const char * argv[])
 {
-   SDL_Window* window;
-   const uint32_t tickMS = 1000.0 / 60;
+   SDL_Window* window = NULL;
+   SDL_Renderer* renderer = NULL;
    
    assert(sizeof(slm::vec2) == 8);
    assert(sizeof(slm::vec3) == 12);
@@ -3272,278 +3349,318 @@ int main(int argc, const char * argv[])
    
    DarkstarPersistObject::initStatics();
    
-   if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
+   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
       printf("Couldn't initialize SDL: %s\n", SDL_GetError());
       return (1);
    }
    
-   window = SDL_CreateWindow( "DTS Viewer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1024, 700, SDL_WINDOW_SHOWN |
-#ifdef USE_METAL
-    //  SDL_WINDOW_RESIZABLE | // Not implemented properly in SDL
-      SDL_WINDOW_ALLOW_HIGHDPI
-#else
-      SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
-#endif
-      );
-   
-   if( window == NULL ) {
+   if (!SDL_CreateWindowAndRenderer("DTS Viewer", 1024, 700, SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE, &window, &renderer)) {
       printf( "Window could not be created! SDL_Error: %s\n", SDL_GetError() );
       return (1);
    }
-   
-   if (!GFXSetup(window))
+
+   // Init basic main
+   gMainState.init(window, argc, argv);
+
+   int setupCode = GFXSetup(window, renderer);
+
+   if (setupCode < 0)
    {
       return 1;
    }
-   
-#if 0
-   uint32_t lastTicks = SDL_GetTicks();
-   bool running = true;
-   slm::vec3 testPos(0,0,0);
-   slm::vec3 deltaMovement(0,0,0);
-   slm::vec3 deltaRot(0,0,0);
-   while (running)
+
+   // Non-Emscripten setup
+   while (setupCode != 0)
    {
-      uint32_t curTicks = SDL_GetTicks();
-      float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
-      lastTicks = curTicks;
-      
-      int w, h;
-      SDL_GetWindowSize(window, &w, &h);
-      
-      testPos += deltaMovement * dt * 100;
-      
-      //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 0);
-      //SDL_RenderClear(renderer);
-      //SDL_RenderCopy(renderer, bitmapTex, NULL, NULL);
-      
-      GFXTestRender(testPos);
-      
-      //SDL_RenderPresent(renderer);
-      
-      SDL_Event event;
-      while (SDL_PollEvent(&event))
-      {
-         switch (event.type)
-         {
-            case SDL_KEYDOWN:
-            case SDL_KEYUP:
-            {
-               switch (event.key.keysym.sym)
-               {
-                  case SDLK_a:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_s: deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_q:    deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_e:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_w:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_d:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
-               }
-            }
-               break;
-               
-            case SDL_QUIT:
-               running = false;
-               break;
-         }
-      }
+      setupCode = GFXSetup(window, renderer);
    }
-#endif
-#if 1
-   
-   ResManager resManager;
-   ShapeViewerController shapeController(window, &resManager);
-   InteriorViewerController interiorController(window, &resManager);
-   ViewController *currentController = &shapeController;
-   
-   for (int i=1; i<argc; i++)
+
+   int ret = gMainState.boot();
+   if (ret != 0)
+      return ret;
+
+   while (gMainState.loop() == 0)
    {
-      const char *path = argv[i];
+      ;
+   }
+
+   gMainState.shutdown();
+
+   return 0;
+}
+
+void MainState::shutdown()
+{
+   if (shapeController)
+   {
+      delete shapeController;
+      delete interiorController;
+      shapeController = NULL;
+      interiorController = NULL;
+   }
+   
+   GFXTeardown();
+   gMainState.shutdown();
+   SDL_DestroyWindow( gMainState.window );
+   SDL_Quit();
+}
+
+int MainState::boot()
+{
+   for (int i=1; i<in_argc; i++)
+   {
+      const char *path = in_argv[i];
       if (path && path[0] == '-')
          break;
-      std::string ext = fs::extension(path);
+
+      fs::path filePath = path;
+      std::string  ext = filePath.extension();
       std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
       
-      if (ext == ".dts") {
-         shapeController.loadShape(path);
-         currentController = &shapeController;
+      if (ext == ".dts")
+      {
+         shapeController->loadShape(path);
+         currentController = shapeController;
       }
       else if (ext == ".vol" || ext == ".ted")
+      {
          resManager.addVolume(path);
+      }
       else if (ext == ".ppl" || ext == ".pal")
       {
-         shapeController.mPaletteName = path;
-         interiorController.mPaletteName = path;
+         shapeController->mPaletteName = path;
+         interiorController->mPaletteName = path;
       }
       else if (ext == ".dis")
       {
-         interiorController.loadInterior(path);
-         currentController = &interiorController;
+         interiorController->loadInterior(path);
+         currentController = interiorController;
       }
       else if (ext == "")
+      {
          resManager.mPaths.emplace_back(path);
+      }
    }
    
    if (!currentController->isResourceLoaded())
    {
       fprintf(stderr, "please specify a starting shape or interior to load\n");
-      return -1;
+      return 1;
    }
+
+   running = true;
    
-   ImGui::StyleColorsDark();
+   deltaMovement = slm::vec3(0);
+   deltaRot = slm::vec3(0);
+   lastTicks = SDL_GetTicks();
    
-   SDL_Event event;
-   bool running = true;
-   
-   slm::vec3 deltaMovement(0);
-   slm::vec3 deltaRot(0);
-   uint32_t lastTicks = SDL_GetTicks();
-   
-   int selectedFileIdx = -1;
-   int selectedVolumeIdx = -1;
-   std::vector<ResManager::EnumEntry> fileList;
-   std::vector<std::string> restrictExtList;
+   selectedFileIdx = -1;
+   selectedVolumeIdx = -1;
+   restrictExtList.clear();
+   fileList.clear();
    restrictExtList.push_back(".dts");
    restrictExtList.push_back(".dis");
    resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
-   std::vector<const char*> cFileList;
-   std::vector<std::string> sFileList;
-   std::vector<const char*> cVolumeList;
    sFileList.resize(fileList.size());
+
    for (int i=0; i<fileList.size(); i++)
    {
       sFileList[i] = fileList[i].filename;
    }
+   
    for (int i=0; i<fileList.size(); i++)
    {
       cFileList.push_back(sFileList[i].c_str());
    }
+   
    resManager.enumerateSearchPaths(cVolumeList);
+
+   oldSelectedVolumeIdx = -1;
+   oldSelectedFileIdx = -1;
    
-   int oldSelectedVolumeIdx = -1;
-   int oldSelectedFileIdx = -1;
+   return 0;
+}
+
+int MainState::loop()
+{
+   if (!running)
+      return 1;
    
-   while (running)
+   ImGui::StyleColorsDark();
+   
+   SDL_Event event;
+
+   uint32_t curTicks = SDL_GetTicks();
+   uint32_t oldLastTicks = lastTicks;
+   float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
+   lastTicks = curTicks;
+   
+   currentController->mCamRot += deltaRot * dt * 100;
+   slm::mat4 rotMat = slm::rotation_z(slm::radians(currentController->mCamRot.z)) * slm::rotation_y(slm::radians(currentController->mCamRot.y)) *  slm::rotation_x(slm::radians(currentController->mCamRot.x));
+   //rotMat = inverse(rotMat);
+   slm::vec4 forwardVec = rotMat * slm::vec4(deltaMovement, 1);
+   currentController->mViewPos += forwardVec.xyz() * dt;
+   
+   int w, h;
+   SDL_GetWindowSize(window, &w, &h);
+   
+   //glViewport(0,0,w,h);
+   
+   if (oldSelectedVolumeIdx != selectedVolumeIdx)
    {
-      uint32_t curTicks = SDL_GetTicks();
-      uint32_t oldLastTicks = lastTicks;
-      float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
-      lastTicks = curTicks;
+      fileList.clear();
+      resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
+      oldSelectedVolumeIdx = selectedVolumeIdx;
       
-      currentController->mCamRot += deltaRot * dt * 100;
-      slm::mat4 rotMat = slm::rotation_z(slm::radians(currentController->mCamRot.z)) * slm::rotation_y(slm::radians(currentController->mCamRot.y)) *  slm::rotation_x(slm::radians(currentController->mCamRot.x));
-      //rotMat = inverse(rotMat);
-      slm::vec4 forwardVec = rotMat * slm::vec4(deltaMovement, 1);
-      currentController->mViewPos += forwardVec.xyz() * dt;
-      
-      int w, h;
-      SDL_GetWindowSize(window, &w, &h);
-      
-      //glViewport(0,0,w,h);
-      
-      if (oldSelectedVolumeIdx != selectedVolumeIdx)
+      cFileList.clear();
+      sFileList.resize(fileList.size());
+      for (int i=0; i<fileList.size(); i++)
       {
-         fileList.clear();
-         resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
-         oldSelectedVolumeIdx = selectedVolumeIdx;
-         
-         cFileList.clear();
-         sFileList.resize(fileList.size());
-         for (int i=0; i<fileList.size(); i++)
-         {
-            sFileList[i] = fileList[i].filename;
-         }
-         for (int i=0; i<fileList.size(); i++)
-         {
-            cFileList.push_back(sFileList[i].c_str());
-         }
-         
-         oldSelectedFileIdx = selectedFileIdx = -1;
+         sFileList[i] = fileList[i].filename;
+      }
+      for (int i=0; i<fileList.size(); i++)
+      {
+         cFileList.push_back(sFileList[i].c_str());
       }
       
-      if (oldSelectedFileIdx != selectedFileIdx)
-      {
-         std::string ext = fs::extension(cFileList[selectedFileIdx]);
-         
-         if (ext == ".dis")
-         {
-            interiorController.loadInterior(cFileList[selectedFileIdx], selectedVolumeIdx);
-            currentController = &interiorController;
-         }
-         else
-         {
-            shapeController.loadShape(cFileList[selectedFileIdx], selectedVolumeIdx);
-            currentController = &shapeController;
-         }
-         oldSelectedFileIdx = selectedFileIdx;
-      }
+      oldSelectedFileIdx = selectedFileIdx = -1;
+   }
+   
+   if (oldSelectedFileIdx != selectedFileIdx)
+   {
+      fs::path filePath = cFileList[selectedFileIdx];
+      std::string  ext = filePath.extension();
       
-      while (SDL_PollEvent(&event))
+      if (ext == ".dis")
       {
-         switch (event.type)
-         {
-            case SDL_WINDOWEVENT:
-            {
-               if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                   event.window.event == SDL_WINDOWEVENT_RESIZED)
-                  GFXHandleResize();
-               break;
-            }
-               
-            case SDL_KEYDOWN:
-            case SDL_KEYUP:
-            {
-               slm::vec3 forwardVec = slm::vec3();
-               switch (event.key.keysym.sym)
-               {
-                  case SDLK_a:  deltaMovement.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_d:  deltaMovement.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_q:  deltaMovement.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_e:  deltaMovement.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_w:  deltaMovement.z = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_s:  deltaMovement.z = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_LEFT:  deltaRot.y = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_RIGHT: deltaRot.y = event.type == SDL_KEYDOWN ? -1 : 0; break;
-                  case SDLK_UP:  deltaRot.x = event.type == SDL_KEYDOWN ? 1 : 0; break;
-                  case SDLK_DOWN: deltaRot.x = event.type == SDL_KEYDOWN ? -1 : 0; break;
-               }
-            }
-               break;
-               
-            case SDL_QUIT:
-               running = false;
-               break;
-         }
-      }
-      
-      if (GFXBeginFrame())
-      {
-         currentController->update(dt);
-         
-         ImGui::Begin("Browse");
-         ImGui::Columns(2);
-         ImGui::ListBox("##bvols", &selectedVolumeIdx, &cVolumeList[0], cVolumeList.size());
-         ImGui::NextColumn();
-         ImGui::ListBox("##bfiles", &selectedFileIdx, &cFileList[0], cFileList.size());
-         ImGui::End();
-         
-         GFXEndFrame();
+         interiorController->loadInterior(cFileList[selectedFileIdx], selectedVolumeIdx);
+         currentController = interiorController;
       }
       else
       {
-         lastTicks = oldLastTicks;
+         shapeController->loadShape(cFileList[selectedFileIdx], selectedVolumeIdx);
+         currentController = shapeController;
       }
-      
-      uint32_t endTicks = SDL_GetTicks();
-      if (endTicks - lastTicks < tickMS)
+      oldSelectedFileIdx = selectedFileIdx;
+   }
+   
+   while (SDL_PollEvent(&event))
+   {
+      switch (event.type)
       {
-         SDL_Delay(tickMS - (endTicks - lastTicks));
+      case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+      case SDL_EVENT_WINDOW_RESIZED:
+         GFXHandleResize();
+         break;
+         
+      case SDL_EVENT_KEY_DOWN:
+      case SDL_EVENT_KEY_UP:
+         {
+            slm::vec3 forwardVec = slm::vec3();
+            switch (event.key.key)
+            {
+            case SDLK_A:  deltaMovement.x = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_D:  deltaMovement.x = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_Q:  deltaMovement.y = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_E:  deltaMovement.y = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_W:  deltaMovement.z = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_S:  deltaMovement.z = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_LEFT:  deltaRot.y = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_RIGHT: deltaRot.y = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_UP:  deltaRot.x = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_DOWN: deltaRot.x = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            }
+         }
+         break;
+         
+      case SDL_EVENT_QUIT:
+         running = false;
+         break;
       }
    }
    
-#endif
+   if (GFXBeginFrame())
+   {
+      currentController->update(dt);
+      
+      ImGui::Begin("Browse");
+      ImGui::Columns(2);
+      ImGui::ListBox("##bvols", &selectedVolumeIdx, &cVolumeList[0], cVolumeList.size());
+      ImGui::NextColumn();
+      ImGui::ListBox("##bfiles", &selectedFileIdx, &cFileList[0], cFileList.size());
+      ImGui::End();
+      
+      GFXEndFrame();
+   }
+   else
+   {
+      lastTicks = oldLastTicks;
+   }
    
-   SDL_DestroyWindow( window );
-   SDL_Quit();
+   uint32_t endTicks = SDL_GetTicks();
+   if (endTicks - lastTicks < tickMS)
+   {
+      SDL_Delay(tickMS - (endTicks - lastTicks));
+   }
 
-   return 0;
+   return running ? 0 : 1;
+}
+
+int MainState::testBoot()
+{
+   lastTicks = SDL_GetTicks();
+   testPos = slm::vec3(0,0,0);
+   deltaMovement = slm::vec3(0,0,0);
+   deltaRot = slm::vec3(0,0,0);
+}
+
+int MainState::testLoop()
+{
+   if (!running)
+      return 1;
+
+   uint32_t curTicks = SDL_GetTicks();
+   float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
+   lastTicks = curTicks;
+   
+   int w, h;
+   SDL_GetWindowSize(window, &w, &h);
+   
+   testPos += deltaMovement * dt * 100;
+   
+   //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 0);
+   //SDL_RenderClear(renderer);
+   //SDL_RenderCopy(renderer, bitmapTex, NULL, NULL);
+   
+   GFXTestRender(testPos);
+   
+   //SDL_RenderPresent(renderer);
+   
+   SDL_Event event;
+   while (SDL_PollEvent(&event))
+   {
+      switch (event.type)
+      {
+      case SDL_EVENT_KEY_DOWN:
+      case SDL_EVENT_KEY_UP:
+         {
+            switch (event.key.key)
+            {
+            case SDLK_A:  deltaMovement.x = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_S: deltaMovement.x = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_Q:    deltaMovement.y = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            case SDLK_E:  deltaMovement.y = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_W:  deltaMovement.z = event.type == SDL_EVENT_KEY_DOWN ? -1 : 0; break;
+            case SDLK_D:  deltaMovement.z = event.type == SDL_EVENT_KEY_DOWN ? 1 : 0; break;
+            }
+         }
+         break;
+         
+      case SDL_EVENT_QUIT:
+         running = false;
+         break;
+      }
+   }
+
+   return running ? 0 : 1;
 }

@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <climits>
 #include <unordered_map>
 #include <slm/slmath.h>
 #include "CommonData.h"

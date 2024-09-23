@@ -6,10 +6,13 @@
 class Bitmap;
 class Palette;
 class SDL_Window;
+class SDL_Renderer;
 
-extern bool GFXSetup(SDL_Window* window);
+extern int GFXSetup(SDL_Window* window, SDL_Renderer* renderer);
 extern void GFXTeardown();
 extern void GFXTestRender(slm::vec3 pos);
+extern void GFXPollEvents();
+extern void GFXResetSwapChain();
 
 extern bool GFXBeginFrame();
 extern void GFXEndFrame();

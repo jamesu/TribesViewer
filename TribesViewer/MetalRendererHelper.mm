@@ -799,7 +799,7 @@ void GFXDrawLine(slm::vec3 start, slm::vec3 end, slm::vec4 color, float width)
    [gRenderHelper drawLineStart:start end:end color:color width:width];
 }
 
-bool GFXSetup(SDL_Window* window)
+bool GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
 {
    int metalDriverIdx = -1;
    int drivers = SDL_GetNumRenderDrivers();
@@ -821,7 +821,7 @@ bool GFXSetup(SDL_Window* window)
       return false;
    }
    
-   SDL_Renderer* renderer = SDL_CreateRenderer(window, metalDriverIdx, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+   //SDL_Renderer* renderer = SDL_CreateRenderer(window, metalDriverIdx, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
    
    SDL_SetRenderDrawColor(renderer, 255, 0, 255, 0);
    SDL_RenderClear(renderer);

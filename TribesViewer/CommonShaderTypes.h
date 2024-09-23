@@ -23,14 +23,28 @@
 #ifndef CommonShaderTypes_h
 #define CommonShaderTypes_h
 
+
+#ifndef __METAL_VERSION__
+typedef slm::vec2 vector_uint2;
+typedef slm::vec2 packed_float2;
+typedef slm::vec3 packed_float3;
+typedef slm::vec4 packed_float4;
+typedef slm::vec2 vector_float2;
+typedef slm::vec3 vector_float3;
+typedef slm::vec4 vector_float4;
+typedef slm::mat4 matrix_float4x4;
+typedef slm::vec2 viewport_size;
+#else
 #include <simd/simd.h>
+#endif
 
 enum ModelPipelineState
 {
    ModelPipeline_DefaultDiffuse,
    ModelPipeline_AdditiveBlend,
    ModelPipeline_SubtractiveBlend,
-   ModelPipeline_TranslucentBlend
+   ModelPipeline_TranslucentBlend,
+   ModelPipeline_Count
 };
 
 typedef struct
@@ -62,35 +76,6 @@ typedef struct
    packed_float4 color;
 } LineVertex;
 
-typedef struct
-{
-   // Per Frame Uniforms
-   matrix_float4x4 view_matrix;
-   matrix_float4x4 projection_matrix;
-   matrix_float4x4 projection_matrix_inverse;
-   matrix_float4x4 model_matrix;
-   
-   vector_uint2 viewport_size;
-   
-   vector_float4 line_params;
-   
-   vector_float3 light_pos;
-   vector_float4 light_color;
-   
-   float alpha_test;
-} TVUniforms;
-
-typedef enum TVBufferIndices
-{
-   TVBufferIndexMeshPositions     = 0,
-   TVBufferIndexUniforms          = 1,
-   TVBufferIndexMeshTexcoords     = 2
-} TVBufferIndices;
-
-enum TVBufferTextures
-{
-  TVTextureDiffuse = 0
-};
 
 
 
