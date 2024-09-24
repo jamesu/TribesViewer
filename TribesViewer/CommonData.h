@@ -23,6 +23,9 @@
 #ifndef _COMMONDATA_H_
 #define _COMMONDATA_H_
 
+#include <algorithm>
+#include <functional>
+
 struct _LineVert
 {
    slm::vec3 pos;
@@ -43,6 +46,7 @@ inline uint32_t getNextPow2(uint32_t a)
 }
 
 class MemRStream;
+
 // Root class for PERS objects
 class DarkstarPersistObject
 {

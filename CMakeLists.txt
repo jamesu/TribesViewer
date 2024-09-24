@@ -107,3 +107,16 @@ add_executable(TribesViewer ${TRIBESVIEWER_SRC})
 target_link_libraries(TribesViewer ${SDL3_LIBS} -lm -pthread ${TARGET_LIBS})
 target_compile_definitions(TribesViewer PRIVATE ${TARGET_DEFINES})
 
+# Link frameworks
+if(APPLE)
+    find_library(COREFOUNDATION_LIBRARY CoreFoundation)
+    find_library(METAL_LIBRARY Metal)
+    find_library(QUARTZCORE_LIBRARY QuartzCore)
+
+    target_link_libraries(TribesViewer
+        ${COREFOUNDATION_LIBRARY}
+        ${METAL_LIBRARY}
+        ${QUARTZCORE_LIBRARY}
+    )
+endif()
+

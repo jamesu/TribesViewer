@@ -1132,6 +1132,9 @@ void SDLState::endRenderPass()
 
 void GFXTeardown()
 {
+   if (smState.gpuDevice == NULL)
+      return;
+   
    ImGui_ImplWGPU_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    smState.resetWGPUState();
