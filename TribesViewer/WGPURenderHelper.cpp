@@ -51,6 +51,11 @@ extern "C"
 #endif
 }
 
+static inline size_t AlignSize(const size_t size, const uint16_t alignment)
+{
+   return (size + (alignment - 1)) & ~(alignment - 1);
+}
+
 struct CommonUniformStruct
 {
    slm::mat4 projMat;
@@ -221,11 +226,11 @@ struct SDLState
    BufferRef allocBuffer(size_t size, uint32_t flags, uint16_t alignment);
    void resetBufferAllocs();
    
-   void beginRenderPass();
+   void beginRenderPass(bool secondary);
    void endRenderPass();
    
    WGPUBindGroup makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sampler);
-   WGPURenderPassDescriptor createRenderPass();
+   WGPURenderPassDescriptor createRenderPass(bool secondary);
 };
 
 
@@ -601,6 +606,8 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO(); (void)io;
+   
+   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
    
    ImGui_ImplSDL3_InitForOther(window);
    ImGui_ImplWGPU_Init(&imInfo);
@@ -1033,13 +1040,13 @@ WGPUBindGroup SDLState::makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sam
 }
 
 // Create the render pass
-WGPURenderPassDescriptor SDLState::createRenderPass()
+WGPURenderPassDescriptor SDLState::createRenderPass(bool secondary)
 {
    // Color attachment
    static WGPURenderPassColorAttachment colorAttachment = {};
    colorAttachment.view = gpuSurfaceTextureView;
    colorAttachment.resolveTarget = NULL;  // No MSAA
-   colorAttachment.loadOp = WGPULoadOp_Clear;  // Clear the color buffer at the start
+   colorAttachment.loadOp = secondary ? WGPULoadOp_Load : WGPULoadOp_Clear;  // Clear the color buffer at the start
    colorAttachment.storeOp = WGPUStoreOp_Store; // Store the color output
    colorAttachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 1.0}; // Clear to black with full opacity
    
@@ -1082,12 +1089,7 @@ bool SDLState::loadShaderModule(const char* name, const char* code)
    }
 }
 
-static const size_t BufferSize = 1024*1024;
-
-static inline size_t AlignSize(const size_t size, const uint16_t alignment)
-{
-   return (size + (alignment - 1)) & ~(alignment - 1);
-}
+static const size_t BufferSize = 1024*1024*3;
 
 SDLState::BufferRef SDLState::allocBuffer(size_t size, uint32_t flags, uint16_t alignment)
 {
@@ -1097,6 +1099,7 @@ SDLState::BufferRef SDLState::allocBuffer(size_t size, uint32_t flags, uint16_t 
       if (alloc.flags != flags)
          continue;
       
+      alloc.head = AlignSize(alloc.head, alignment);
       size_t nextSize = alloc.head + size;
       nextSize = AlignSize(nextSize, alignment);
       if (nextSize > alloc.size)
@@ -1133,7 +1136,7 @@ void SDLState::resetBufferAllocs()
    }
 }
 
-void SDLState::beginRenderPass()
+void SDLState::beginRenderPass(bool secondary)
 {
    if (renderEncoder != NULL)
       return;
@@ -1142,7 +1145,7 @@ void SDLState::beginRenderPass()
    desc.label = "FrameEncoder";
    commandEncoder = wgpuDeviceCreateCommandEncoder(gpuDevice, &desc);
 
-   WGPURenderPassDescriptor renderPassDesc = createRenderPass();
+   WGPURenderPassDescriptor renderPassDesc = createRenderPass(secondary);
    renderEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &renderPassDesc);
 }
 
@@ -1234,21 +1237,25 @@ bool GFXBeginFrame()
       smState.gpuSurfaceTextureView = wgpuTextureCreateView(smState.gpuSurfaceTexture.texture, &viewDescriptor);
    }
 
-   smState.beginRenderPass();
+   smState.beginRenderPass(false);
    
-   //ImGui_ImplWGPU_NewFrame();
-   //ImGui_ImplSDL3_NewFrame();
-   //ImGui::NewFrame();
+   ImGui_ImplWGPU_NewFrame();
+   ImGui_ImplSDL3_NewFrame();
+   ImGui::NewFrame();
    
    return true;
 }
 
 void GFXEndFrame()
 {
-   //ImGui::EndFrame();
-   //ImGui::Render();
-   //ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), smState.renderEncoder);
-   //ImGui::
+   smState.endRenderPass();
+   
+   // Render imgui
+   
+   smState.beginRenderPass(true);
+   ImGui::EndFrame();
+   ImGui::Render();
+   ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), smState.renderEncoder);
    
    smState.endRenderPass();
    
@@ -1286,7 +1293,8 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
    uint32_t pow2H = getNextPow2(bmp->mHeight);
    WGPUTextureFormat pixFormat = WGPUTextureFormat_Undefined;
    
-   uint32_t alignedMipSize = (uint32_t)AlignSize(pow2W*pow2H*4, 256);
+   uint32_t paddedWidth = (uint32_t)AlignSize(pow2W*4, 256);
+   uint32_t alignedMipSize = paddedWidth * pow2H;
    
    if (bmp->mBitDepth == 8)
    {
@@ -1306,23 +1314,23 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
       if (bmp->mFlags & Bitmap::FLAG_TRANSPARENT)
       {
          texData = new uint8_t[alignedMipSize];
-         copyMipRGBA(bmp->mWidth, bmp->mHeight, pow2W*4, pal, bmp->mMips[0], texData, 255);
+         copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texData, 255);
       }
       else if (bmp->mFlags & Bitmap::FLAG_TRANSLUCENT)
       {
          texData = new uint8_t[alignedMipSize];
-         copyMipRGBA(bmp->mWidth, bmp->mHeight, pow2W*4, pal, bmp->mMips[0], texData, 1);
+         copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texData, 1);
       }
       else
       {
          texData = new uint8_t[alignedMipSize];
-         copyMipRGBA(bmp->mWidth, bmp->mHeight, pow2W*4, pal, bmp->mMips[0], texData, 256);
+         copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texData, 256);
       }
    }
    else if (bmp->mBitDepth == 24)
    {
       uint8_t* texData = new uint8_t[alignedMipSize];
-      copyMipDirectPadded(bmp->mHeight, bmp->getStride(bmp->mWidth), pow2W*3, bmp->mMips[0], texData);
+      copyMipDirectPadded(bmp->mHeight, bmp->getStride(bmp->mWidth), paddedWidth, bmp->mMips[0], texData);
    }
    else
    {
@@ -1356,7 +1364,7 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
       // Upload texture data
       WGPUTextureDataLayout layout = {};
       layout.offset = 0;
-      layout.bytesPerRow = AlignSize(pow2W * 4, 256);
+      layout.bytesPerRow = paddedWidth;
       layout.rowsPerImage = pow2H;
       WGPUExtent3D size = {pow2W, pow2H, 1};
       
@@ -1369,7 +1377,7 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
       wgpuQueueWriteTexture(smState.gpuQueue,
                             &copyInfo,
                             texData,
-                            pow2W * pow2H * 4, // Assuming 4 bytes per pixel (RGBA8 format)
+                            alignedMipSize, // Assuming padded 4 bytes per pixel (RGBA8 format)
                             &layout,
                             &size);
       
@@ -1511,7 +1519,7 @@ void GFXSetModelVerts(uint32_t modelId, uint32_t vertOffset, uint32_t texOffset)
    SDLState::FrameModel& model = smState.models[modelId];
    const size_t vertSize = sizeof(ModelVertex) * model.numVerts;
    const size_t texVertSize = sizeof(ModelTexVertex) * model.numTexVerts;
-   const size_t indexSize = sizeof(uint16_t) * model.numInds;
+   const size_t indexSize = AlignSize(sizeof(uint16_t) * model.numInds, sizeof(uint32_t));
    
    if (model.inFrame == false)
    {
@@ -1555,7 +1563,7 @@ void GFXBeginLinePipelineState()
 }
 
 void GFXDrawLine(slm::vec3 start, slm::vec3 end, slm::vec4 color, float width)
-{
+{return;
    _LineVert verts[6];
    verts[0].pos = start;
    verts[0].nextPos = end;
