@@ -3407,6 +3407,8 @@ void MainState::shutdown()
 
 int MainState::boot()
 {
+   currentController = shapeController;
+   
    for (int i=1; i<in_argc; i++)
    {
       const char *path = in_argv[i];

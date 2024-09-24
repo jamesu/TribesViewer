@@ -235,7 +235,7 @@ static LineProgramInfo buildLineProgram()
    LineProgramInfo ret;
    
    // Create the pipeline layout
-   WGPUPipelineLayoutDescriptor pipelineLayoutDesc;
+   WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
    pipelineLayoutDesc.label = "Pipeline Layout";
    pipelineLayoutDesc.bindGroupLayoutCount = 1;
    WGPUBindGroupLayout bindGroupLayouts[1] = {smState.commonUniformLayout};
@@ -247,47 +247,51 @@ static LineProgramInfo buildLineProgram()
    WGPUVertexAttribute vertexAttributes[4];
    
    // Position attribute
+   vertexAttributes[0] = {};
    vertexAttributes[0].format = WGPUVertexFormat_Float32x3;
    vertexAttributes[0].offset = offsetof(LineVertex, position);
    vertexAttributes[0].shaderLocation = 0; // Corresponding to `position` in the shader
    
    // Next position attribute
+   vertexAttributes[1] = {};
    vertexAttributes[1].format = WGPUVertexFormat_Float32x3;
    vertexAttributes[1].offset = offsetof(LineVertex, nextPosition);
    vertexAttributes[1].shaderLocation = 1; // Corresponding to `nextPosition` in the shader
    
    // Normal attribute
+   vertexAttributes[2] = {};
    vertexAttributes[2].format = WGPUVertexFormat_Float32x3;
    vertexAttributes[2].offset = offsetof(LineVertex, normal);
    vertexAttributes[2].shaderLocation = 2; // Corresponding to `normal` in the shader
    
-   // Color attribute (packed_float4)
+   // Color attribute
+   vertexAttributes[3] = {};
    vertexAttributes[3].format = WGPUVertexFormat_Float32x4;
    vertexAttributes[3].offset = offsetof(LineVertex, color);
    vertexAttributes[3].shaderLocation = 3; // Corresponding to `color` in the shader
    
    // Define the vertex buffer layout
-   WGPUVertexBufferLayout vertexBufferLayout;
+   WGPUVertexBufferLayout vertexBufferLayout = {};
    vertexBufferLayout.arrayStride = sizeof(LineVertex);
    vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex; // Per-vertex data
    vertexBufferLayout.attributeCount = 4;
    vertexBufferLayout.attributes = vertexAttributes;
    
    // Vertex state configuration
-   WGPUVertexState vertexState;
+   WGPUVertexState vertexState = {};
    vertexState.module = smState.shaders["lineShader"];  // Loaded shader module
-   vertexState.entryPoint = "vertMain";          // Entry point of the vertex shader
+   vertexState.entryPoint = "mainVert";          // Entry point of the vertex shader
    vertexState.bufferCount = 1;
    vertexState.buffers = &vertexBufferLayout;
    
    // Create the bind group layout for group 0 (if needed)
-   WGPUBindGroupLayoutEntry bindGroupLayoutEntry0;
+   WGPUBindGroupLayoutEntry bindGroupLayoutEntry0 = {};
    bindGroupLayoutEntry0.binding = 0;
    bindGroupLayoutEntry0.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
    bindGroupLayoutEntry0.buffer.type = WGPUBufferBindingType_Uniform;
    bindGroupLayoutEntry0.buffer.minBindingSize = sizeof(CommonUniformStruct);
    
-   WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc0;
+   WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc0 = {};
    bindGroupLayoutDesc0.label = "Uniform Bind Group Layout";
    bindGroupLayoutDesc0.entryCount = 1;
    bindGroupLayoutDesc0.entries = &bindGroupLayoutEntry0;
@@ -295,12 +299,12 @@ static LineProgramInfo buildLineProgram()
    WGPUBindGroupLayout bindGroupLayout0 = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDesc0);
    
    // Fragment state
-   WGPUFragmentState fragmentState;
+   WGPUFragmentState fragmentState = {};
    fragmentState.module = smState.shaders["lineShader"]; // Loaded fragment shader module
-   fragmentState.entryPoint = "fragMain";           // Entry point of the fragment shader
+   fragmentState.entryPoint = "mainFrag";           // Entry point of the fragment shader
    fragmentState.targetCount = 1;
    
-   WGPUColorTargetState colorTargetState;
+   WGPUColorTargetState colorTargetState = {};
    colorTargetState.format = WGPUTextureFormat_RGBA8Unorm; // Output texture format
    colorTargetState.blend = NULL;                          // No blending
    colorTargetState.writeMask = WGPUColorWriteMask_All;    // Write all color channels
@@ -308,14 +312,14 @@ static LineProgramInfo buildLineProgram()
    fragmentState.targets = &colorTargetState;
    
    // Define the primitive state (we assume you are drawing lines, so topology is LineList)
-   WGPUPrimitiveState primitiveState;
+   WGPUPrimitiveState primitiveState = {};
    primitiveState.topology = WGPUPrimitiveTopology_TriangleList;
    primitiveState.stripIndexFormat = WGPUIndexFormat_Undefined;  // Non-indexed drawing
    primitiveState.frontFace = WGPUFrontFace_CW;                  // Not relevant since there's no culling
    primitiveState.cullMode = WGPUCullMode_None;                  // No culling for lines
    
    // Multisample state
-   WGPUMultisampleState multisampleState;
+   WGPUMultisampleState multisampleState = {};
    multisampleState.count = 1;
    multisampleState.mask = ~0;
    multisampleState.alphaToCoverageEnabled = false;
@@ -323,7 +327,7 @@ static LineProgramInfo buildLineProgram()
    // Since there is no depth testing, we omit the depthStencil state
    
    // Create the render pipeline descriptor
-   WGPURenderPipelineDescriptor pipelineDesc;
+   WGPURenderPipelineDescriptor pipelineDesc = {};
    pipelineDesc.label = "Render Pipeline";
    pipelineDesc.layout = pipelineLayout;
    pipelineDesc.vertex = vertexState;
@@ -343,7 +347,7 @@ ProgramInfo buildProgram()
    ProgramInfo ret;
    
    // Create the pipeline layout
-   WGPUPipelineLayoutDescriptor pipelineLayoutDesc;
+   WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
    pipelineLayoutDesc.label = "Pipeline Layout";
    pipelineLayoutDesc.bindGroupLayoutCount = 2;
    WGPUBindGroupLayout bindGroupLayouts[2] = {smState.commonUniformLayout, smState.commonTextureLayout};
@@ -354,15 +358,17 @@ ProgramInfo buildProgram()
    auto buildPipelineForState = [&pipelineLayout](ModelPipelineState state){
       // Vertex buffer layout for stream 0 (ModelVertex)
       WGPUVertexAttribute vertexAttributes0[2];
+      vertexAttributes0[0] = {};
       vertexAttributes0[0].format = WGPUVertexFormat_Float32x3;
       vertexAttributes0[0].offset = offsetof(ModelVertex, position);
       vertexAttributes0[0].shaderLocation = 0;
       
+      vertexAttributes0[1] = {};
       vertexAttributes0[1].format = WGPUVertexFormat_Float32x3;
       vertexAttributes0[1].offset = offsetof(ModelVertex, normal);
       vertexAttributes0[1].shaderLocation = 1;
       
-      WGPUVertexBufferLayout vertexBufferLayout0;
+      WGPUVertexBufferLayout vertexBufferLayout0 = {};
       vertexBufferLayout0.arrayStride = sizeof(ModelVertex);
       vertexBufferLayout0.stepMode = WGPUVertexStepMode_Vertex; // Per-vertex data
       vertexBufferLayout0.attributeCount = 2;
@@ -370,26 +376,27 @@ ProgramInfo buildProgram()
       
       // Vertex buffer layout for stream 1 (ModelTexVertex)
       WGPUVertexAttribute vertexAttributes1[1];
+      vertexAttributes1[0] = {};
       vertexAttributes1[0].format = WGPUVertexFormat_Float32x2;
       vertexAttributes1[0].offset = offsetof(ModelTexVertex, texcoord);
       vertexAttributes1[0].shaderLocation = 2;
       
-      WGPUVertexBufferLayout vertexBufferLayout1;
+      WGPUVertexBufferLayout vertexBufferLayout1 = {};
       vertexBufferLayout1.arrayStride = sizeof(ModelTexVertex);
       vertexBufferLayout1.stepMode = WGPUVertexStepMode_Vertex; // Per-vertex data
       vertexBufferLayout1.attributeCount = 1;
       vertexBufferLayout1.attributes = vertexAttributes1;
       
       // Vertex state configuration
-      WGPUVertexState vertexState;
+      WGPUVertexState vertexState = {};
       vertexState.module = smState.shaders["modelShader"];  // Loaded shader module
-      vertexState.entryPoint = "vertMain";          // Entry point of the vertex shader
+      vertexState.entryPoint = "mainVert";          // Entry point of the vertex shader
       vertexState.bufferCount = 2;
       WGPUVertexBufferLayout vertexLayouts[2] = {vertexBufferLayout0, vertexBufferLayout1};
       vertexState.buffers = vertexLayouts;
       
       // Create the pipeline layout
-      WGPUPipelineLayoutDescriptor pipelineLayoutDesc;
+      WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
       pipelineLayoutDesc.label = "Pipeline Layout";
       pipelineLayoutDesc.bindGroupLayoutCount = 2;
       WGPUBindGroupLayout bindGroupLayouts[2] = {smState.commonUniformLayout, smState.commonTextureLayout};
@@ -398,15 +405,15 @@ ProgramInfo buildProgram()
       WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(smState.gpuDevice, &pipelineLayoutDesc);
       
       // Fragment state
-      WGPUFragmentState fragmentState;
+      WGPUFragmentState fragmentState = {};
       fragmentState.module = smState.shaders["modelShader"]; // Loaded fragment shader module
-      fragmentState.entryPoint = "fragMain";         // Entry point of the fragment shader
+      fragmentState.entryPoint = "mainFrag";         // Entry point of the fragment shader
       fragmentState.targetCount = 1;
       
-      WGPUColorTargetState colorTargetState;
+      WGPUColorTargetState colorTargetState = {};
       colorTargetState.format = WGPUTextureFormat_BGRA8Unorm; // Output texture format
       
-      WGPUBlendState blendState;
+      WGPUBlendState blendState = {};
       colorTargetState.blend = NULL;
       
       switch (state)
@@ -453,21 +460,21 @@ ProgramInfo buildProgram()
       fragmentState.targets = &colorTargetState;
       
       // Define the primitive state
-      WGPUPrimitiveState primitiveState;
+      WGPUPrimitiveState primitiveState = {};
       primitiveState.topology = WGPUPrimitiveTopology_TriangleList; // Rendering triangles
       primitiveState.stripIndexFormat = WGPUIndexFormat_Undefined;  // Non-indexed drawing
       primitiveState.frontFace = WGPUFrontFace_CW;                 // Counter-clockwise vertices define the front face
       primitiveState.cullMode = WGPUCullMode_Back;                  // Back-face culling
       
       // Multisample state
-      WGPUMultisampleState multisampleState;
+      WGPUMultisampleState multisampleState = {};
       multisampleState.count = 1;
       multisampleState.mask = ~0;
       multisampleState.alphaToCoverageEnabled = false;
       
       // Depth stencil state
-      WGPUDepthStencilState depthStencilState;
-      depthStencilState.format = WGPUTextureFormat_Depth24Plus;      // Depth format
+      WGPUDepthStencilState depthStencilState = {};
+      depthStencilState.format = WGPUTextureFormat_Depth32Float;      // Depth format
       depthStencilState.depthWriteEnabled = true;                    // Enable depth writing
       depthStencilState.depthCompare = WGPUCompareFunction_Less;     // Use less-than comparison for depth testing
       depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
@@ -482,7 +489,7 @@ ProgramInfo buildProgram()
       depthStencilState.depthBiasClamp = 0.0f;
       
       // Create the render pipeline descriptor
-      WGPURenderPipelineDescriptor pipelineDesc;
+      WGPURenderPipelineDescriptor pipelineDesc = {};
       pipelineDesc.label = "Render Pipeline";
       pipelineDesc.layout = pipelineLayout;
       pipelineDesc.vertex = vertexState;
@@ -515,14 +522,14 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    
    if (smState.gpuBackendType == WGPUBackendType_Undefined)
    {
-#if defined(SDL_VIDEO_DRIVER_COCOA) || defined(SDL_VIDEO_DRIVER_UIKIT)
+#if defined(__APPLE__)
       smState.gpuBackendType = WGPUBackendType_Metal;
-#elif defined(SDL_VIDEO_DRIVER_X11) || defined(SDL_VIDEO_DRIVER_WAYLAND)
+#elif defined(UNIX)
       smState.gpuBackendType = WGPUBackendType_Vulkan;
       // Otherwise, try X11
-#elif defined(SDL_VIDEO_DRIVER_WINDOWS)
+#elif defined(WIN32)
       smState.gpuBackendType = WGPUBackendType_Vulkan;
-#elif defined(SDL_VIDEO_DRIVER_EMSCRIPTEN)
+#elif defined(EMSCRIPTEN)
       smState.gpuBackendType = WGPUBackendType_WebGPU;
 #else
       smState.gpuBackendType = WGPUBackendType_Undefined;
@@ -532,7 +539,11 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    // Need to grab adapter
    if (smState.gpuInitState < SDLState::GOT_SURFACE)
    {
-      smState.initWGPUSurface();
+      if (!smState.initWGPUSurface())
+      {
+         printf("Problem init'ing WGPU");
+         return -1;
+      }
    }
    
    if (smState.gpuInitState < SDLState::GOT_ADAPTER)
@@ -584,9 +595,6 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    smState.window = window;
    smState.renderer = renderer;
    
-   smState.modelProgram = buildProgram();
-   smState.lineProgram = buildLineProgram();
-   
    // Make common sampler
    WGPUSamplerDescriptor samplerDesc = {};
    samplerDesc.minFilter = WGPUFilterMode_Nearest;
@@ -594,13 +602,14 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    samplerDesc.addressModeU = WGPUAddressMode_Repeat;
    samplerDesc.addressModeV = WGPUAddressMode_Repeat;
    samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+   samplerDesc.maxAnisotropy = 1;
    
    smState.modelCommonSampler = wgpuDeviceCreateSampler(smState.gpuDevice, &samplerDesc);
    
    // Make common uniform buffer layout
    
    // Create the bind group layout
-   WGPUBindGroupLayoutEntry bindGroupLayoutEntry0;
+   WGPUBindGroupLayoutEntry bindGroupLayoutEntry0 = {};
    bindGroupLayoutEntry0.binding = 0;
    bindGroupLayoutEntry0.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
    bindGroupLayoutEntry0.buffer.type = WGPUBufferBindingType_Uniform;
@@ -618,6 +627,7 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    WGPUBindGroupLayoutEntry bindGroupLayoutEntries1[2];
    
    // Texture binding
+   bindGroupLayoutEntries1[0] = {};
    bindGroupLayoutEntries1[0].binding = 0;
    bindGroupLayoutEntries1[0].visibility = WGPUShaderStage_Fragment;
    bindGroupLayoutEntries1[0].texture.sampleType = WGPUTextureSampleType_Float;
@@ -625,25 +635,20 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    bindGroupLayoutEntries1[0].texture.multisampled = false;
    
    // Sampler binding
+   bindGroupLayoutEntries1[1] = {};
    bindGroupLayoutEntries1[1].binding = 1;
    bindGroupLayoutEntries1[1].visibility = WGPUShaderStage_Fragment;
    bindGroupLayoutEntries1[1].sampler.type = WGPUSamplerBindingType_Filtering;
    
-   WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc1;
+   WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc1 = {};
    bindGroupLayoutDesc1.label = "Texture/Sampler Bind Group Layout";
    bindGroupLayoutDesc1.entryCount = 2;
    bindGroupLayoutDesc1.entries = bindGroupLayoutEntries1;
    
    smState.commonTextureLayout = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDesc1);
    
-   /*
-    
-    smState.currentProgram = smState.modelProgram.programID;
-    
-    uint32_t VertexArrayID;
-    glGenVertexArrays(1, &VertexArrayID);
-    glBindVertexArray(VertexArrayID);
-    */
+   smState.modelProgram = buildProgram();
+   smState.lineProgram = buildLineProgram();
    
    return 0;
 }
@@ -716,6 +721,8 @@ void GFXPollEvents()
 
 void GFXTeardown();
 
+extern void GFXSetCocoaWindow(SDL_Window* window, WGPUSurfaceDescriptorFromMetalLayer* s);
+
 bool SDLState::initWGPUSurface()
 {
    // In case we have any dangling resources, cleanup
@@ -728,72 +735,68 @@ bool SDLState::initWGPUSurface()
    WGPUSurfaceDescriptor desc = {};
    WGPUChainedStruct cs = {};
    
-#if defined(SDL_VIDEO_DRIVER_COCOA)
-   // TODO
-#elif defined(SDL_VIDEO_DRIVER_UIKIT)
-   // TODO
-#elif defined(SDL_VIDEO_DRIVER_X11) || defined(SDL_VIDEO_DRIVER_WAYLAND)
+#if defined(__APPLE__)
    
-#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+   if (SDL_strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0)
+   {
+      cs.sType = WGPUSType_SurfaceDescriptorFromMetalLayer;
+      
+      WGPUSurfaceDescriptorFromMetalLayer surfaceDescriptorFromMetalLayer;
+      surfaceDescriptorFromMetalLayer.chain = cs;
+      GFXSetCocoaWindow(window, &surfaceDescriptorFromMetalLayer);
+      
+      desc.label = "TorqueSurface";
+      desc.nextInChain = (const WGPUChainedStruct*)&surfaceDescriptorFromMetalLayer;
+   }
+   
+#elif defined(UNIX)
+
    WGPUSurfaceDescriptorFromWaylandSurface chainDescWL = {};
    
    
    if (SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0)
    {
-      struct wl_display *display = (struct wl_display *)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, NULL);
-      struct wl_surface *surface = (struct wl_surface *)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
-      
       cs.sType = WGPUSType_SurfaceDescriptorFromWaylandSurface;
       
       chainDescWL.chain = cs;
-      chainDescWL.display = wayland_display;
-      chainDescWL.surface = wayland_surface;
+      chainDescWL.display = SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, NULL);;
+      chainDescWL.surface = SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);;
       
       desc.label = "TorqueSurface";
       desc.nextInChain = (const WGPUChainedStruct*)&chainDescWL;
    }
-#endif
    
-#if defined(SDL_VIDEO_DRIVER_X11)
    WGPUSurfaceDescriptorFromXlibWindow chainDescX11 = {};
    
    // See if we are using X11...
    if (SDL_strcmp(SDL_GetCurrentVideoDriver(), "x11") == 0)
    {
-      Display *xdisplay = (Display *)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);
-      Window xwindow = (Window)SDL_GetNumberProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
-      
-      
       cs.sType = WGPUSType_SurfaceDescriptorFromXlibWindow;
       
       chainDescX11.chain = cs;
-      chainDescX11.display = x11_display;
-      chainDescX11.window = x11_window;
+      chainDescX11.display = SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);;
+      chainDescX11.window = SDL_GetNumberProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);;
       
       desc.label = "TorqueSurface";
       desc.nextInChain = (const WGPUChainedStruct*)&chainDescX11;
    }
-#endif
    
-#elif defined(SDL_VIDEO_DRIVER_WINDOWS)
+#elif defined(WIN32)
    WGPUSurfaceDescriptorFromWindowsHWND chainDescWIN32 = {};
    chainDescWIN32.chain = &cs;
    
    {
-      HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
-      HINSTANCE hInstance = GetModuleHandle(NULL);
-      
       cs.sType = WGPUSType_SurfaceDescriptorFromWindowsHWND;
       
       chainDescWIN32.chain = cs;
-      chainDescWIN32.hinstance = hInstance;
-      chainDescWIN32.hwnd = hwnd;
+      chainDescWIN32.hinstance = GetModuleHandle(NULL);
+      chainDescWIN32.hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);;
       
       desc.label = "TorqueSurface";
       desc.nextInChain = (const WGPUChainedStruct*)&chainDescWIN32;
    }
    
-#elif defined(SDL_VIDEO_DRIVER_EMSCRIPTEN)
+#elif defined(EMSCRIPTEN)
    
    WGPUSurfaceDescriptorFromCanvasHTMLSelector chainDescES = {};
    
@@ -861,7 +864,7 @@ bool SDLState::initWGPUSwapchain()
    
    backingScale = (float)backingSize[0] / (float)windowSize[0];
    
-   printf("WebGPU SwapChain configured backingSize=(%u,%u), windowSize=(%u,%u)",
+   printf("WebGPU SwapChain configured backingSize=(%u,%u), windowSize=(%u,%u)\n",
           backingSize[0], backingSize[1], windowSize[0], windowSize[1]);
    
    // Configure surface
@@ -880,7 +883,7 @@ bool SDLState::initWGPUSwapchain()
    
    // Make depth
    
-   WGPUTextureDescriptor depthTextureDesc;
+   WGPUTextureDescriptor depthTextureDesc = {};
    depthTextureDesc.label = "Depth Texture";
    depthTextureDesc.size.width = backingSize[0];
    depthTextureDesc.size.height = backingSize[1];
@@ -888,10 +891,11 @@ bool SDLState::initWGPUSwapchain()
    depthTextureDesc.mipLevelCount = 1;
    depthTextureDesc.sampleCount = 1;
    depthTextureDesc.dimension = WGPUTextureDimension_2D;
-   depthTextureDesc.format = WGPUTextureFormat_Depth24Plus;
+   depthTextureDesc.format = WGPUTextureFormat_Depth32Float;
    depthTextureDesc.usage = WGPUTextureUsage_RenderAttachment;
    
    depthTexture = wgpuDeviceCreateTexture(gpuDevice, &depthTextureDesc);
+   depthStencilFormat = WGPUTextureFormat_Depth32Float;
    
    // Create a texture view from the depth texture
    depthTextureView = wgpuTextureCreateView(depthTexture, NULL);

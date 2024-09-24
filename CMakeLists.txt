@@ -92,12 +92,18 @@ endif()
 
 include_directories(${TARGET_HEADER_SEARCH_PATHS})
 
+set(PLATFORM_GLOBS "")
+
+if(APPLE)
+set(PLATFORM_GLOBS "Tribesviewer/SDLApple.mm")
+endif()
 
 # Collect source files
 file(GLOB TRIBESVIEWER_SRC
     "TribesViewer/*.cpp"
     "slm/*.cpp"
     "imgui/*.cpp"
+    ${PLATFORM_GLOBS}
 )
 
 # Add executable
