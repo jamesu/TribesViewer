@@ -161,9 +161,11 @@ struct SDLState
    WGPUBindGroupLayout commonUniformLayout;
    WGPUBindGroupLayout commonTextureLayout;
    WGPUBindGroup commonUniformGroup;
+   BufferRef commonUniformBuffer;
    
    LineProgramInfo lineProgram;
    ProgramInfo modelProgram;
+   
    //
    
    slm::mat4 projectionMatrix;
@@ -305,7 +307,7 @@ static LineProgramInfo buildLineProgram()
    fragmentState.targetCount = 1;
    
    WGPUColorTargetState colorTargetState = {};
-   colorTargetState.format = WGPUTextureFormat_RGBA8Unorm; // Output texture format
+   colorTargetState.format = WGPUTextureFormat_BGRA8Unorm; // Output texture format
    colorTargetState.blend = NULL;                          // No blending
    colorTargetState.writeMask = WGPUColorWriteMask_All;    // Write all color channels
    
@@ -324,7 +326,22 @@ static LineProgramInfo buildLineProgram()
    multisampleState.mask = ~0;
    multisampleState.alphaToCoverageEnabled = false;
    
-   // Since there is no depth testing, we omit the depthStencil state
+   // Depth stencil state
+   // (NOTE: we need this even if we aren't using it)
+   WGPUDepthStencilState depthStencilState = {};
+   depthStencilState.format = WGPUTextureFormat_Depth32Float;      // Depth format
+   depthStencilState.depthWriteEnabled = false;                    // Enable depth writing
+   depthStencilState.depthCompare = WGPUCompareFunction_Always;
+   depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
+   depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilBack = depthStencilState.stencilFront; // Same as front
+   depthStencilState.stencilReadMask = 0xFFFFFFFF;
+   depthStencilState.stencilWriteMask = 0xFFFFFFFF;
+   depthStencilState.depthBias = 0;                               // No depth bias
+   depthStencilState.depthBiasSlopeScale = 0.0f;
+   depthStencilState.depthBiasClamp = 0.0f;
    
    // Create the render pipeline descriptor
    WGPURenderPipelineDescriptor pipelineDesc = {};
@@ -333,7 +350,7 @@ static LineProgramInfo buildLineProgram()
    pipelineDesc.vertex = vertexState;
    pipelineDesc.primitive = primitiveState;
    pipelineDesc.fragment = &fragmentState;
-   pipelineDesc.depthStencil = NULL; // No depth stencil state
+   pipelineDesc.depthStencil = &depthStencilState;
    pipelineDesc.multisample = multisampleState;
    
    // Finally, create the pipeline
@@ -640,12 +657,29 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    bindGroupLayoutEntries1[1].visibility = WGPUShaderStage_Fragment;
    bindGroupLayoutEntries1[1].sampler.type = WGPUSamplerBindingType_Filtering;
    
+   // Uniform buffer setup
+   
+   smState.commonUniformBuffer = smState.allocBuffer(sizeof(CommonUniformStruct), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform, 256);
+   
    WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc1 = {};
    bindGroupLayoutDesc1.label = "Texture/Sampler Bind Group Layout";
    bindGroupLayoutDesc1.entryCount = 2;
    bindGroupLayoutDesc1.entries = bindGroupLayoutEntries1;
    
    smState.commonTextureLayout = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDesc1);
+   
+   WGPUBindGroupEntry commonEntry = {};
+   commonEntry.binding = 0;
+   commonEntry.buffer = smState.commonUniformBuffer.buffer;
+   commonEntry.offset = 0;
+   commonEntry.size = sizeof(CommonUniformStruct);
+   
+   WGPUBindGroupDescriptor commonDesc = {};
+   commonDesc.label = "CommonUniformStruct";
+   commonDesc.layout = smState.commonUniformLayout;
+   commonDesc.entryCount = 1;
+   commonDesc.entries = &commonEntry;
+   smState.commonUniformGroup = wgpuDeviceCreateBindGroup(smState.gpuDevice, &commonDesc);
    
    smState.modelProgram = buildProgram();
    smState.lineProgram = buildLineProgram();
@@ -872,8 +906,8 @@ bool SDLState::initWGPUSwapchain()
    gpuSurfaceConfig.device = gpuDevice;
    gpuSurfaceConfig.usage = WGPUTextureUsage_RenderAttachment;
    gpuSurfaceConfig.format = WGPUTextureFormat_BGRA8Unorm; // should match pipeline
-   //mWGPUSurfaceConfig.viewFormatCount = 1;
-   //mWGPUSurfaceConfig.viewFormats = &mWGPUSurfaceConfig.format;
+   gpuSurfaceConfig.viewFormatCount = 1;
+   gpuSurfaceConfig.viewFormats = &gpuSurfaceConfig.format;
    gpuSurfaceConfig.presentMode = WGPUPresentMode_Fifo;
    gpuSurfaceConfig.alphaMode = WGPUCompositeAlphaMode_Opaque;
    gpuSurfaceConfig.width = backingSize[0];
@@ -978,20 +1012,18 @@ WGPUBindGroup SDLState::makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sam
 {
    WGPUBindGroupEntry bindGroupEntries[2];
    
-   // Texture entry (binding 0)
+   // Texture entry
+   bindGroupEntries[0] = {};
    bindGroupEntries[0].binding = 0;
    bindGroupEntries[0].textureView = tex;
-   bindGroupEntries[0].sampler = NULL;  // Not a sampler binding, leave this NULL
-   bindGroupEntries[0].buffer = NULL;   // Not a buffer binding, leave this NULL
    
-   // Sampler entry (binding 1)
+   // Sampler entry
+   bindGroupEntries[1] = {};
    bindGroupEntries[1].binding = 1;
-   bindGroupEntries[1].textureView = NULL;  // Not a texture view binding, leave this NULL
    bindGroupEntries[1].sampler = sampler;
-   bindGroupEntries[1].buffer = NULL;       // Not a buffer binding, leave this NULL
    
-   WGPUBindGroupDescriptor bindGroupDesc;
-   bindGroupDesc.label = "Texture and Sampler Bind Group";
+   WGPUBindGroupDescriptor bindGroupDesc = {};
+   bindGroupDesc.label = "SimpleBindGoup";
    bindGroupDesc.layout = smState.commonTextureLayout;
    bindGroupDesc.entryCount = 2;
    bindGroupDesc.entries = bindGroupEntries;
@@ -1004,7 +1036,7 @@ WGPUBindGroup SDLState::makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sam
 WGPURenderPassDescriptor SDLState::createRenderPass()
 {
    // Color attachment
-   WGPURenderPassColorAttachment colorAttachment;
+   static WGPURenderPassColorAttachment colorAttachment = {};
    colorAttachment.view = gpuSurfaceTextureView;
    colorAttachment.resolveTarget = NULL;  // No MSAA
    colorAttachment.loadOp = WGPULoadOp_Clear;  // Clear the color buffer at the start
@@ -1012,16 +1044,16 @@ WGPURenderPassDescriptor SDLState::createRenderPass()
    colorAttachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 1.0}; // Clear to black with full opacity
    
    // Depth attachment
-   WGPURenderPassDepthStencilAttachment depthAttachment;
+   static WGPURenderPassDepthStencilAttachment depthAttachment = {};
    depthAttachment.view = depthTextureView;
    depthAttachment.depthLoadOp = WGPULoadOp_Clear;  // Clear the depth buffer
    depthAttachment.depthStoreOp = WGPUStoreOp_Store; // Store depth after rendering
-   //depthAttachment.clearDepth = 1.0f; // Clear depth to the farthest value
+   depthAttachment.depthClearValue = 1.0f;
    depthAttachment.stencilLoadOp = WGPULoadOp_Clear; // Optional if you are using stencil
    depthAttachment.stencilStoreOp = WGPUStoreOp_Discard;
-   //depthAttachment.clearStencil = 0;
+   depthAttachment.stencilClearValue = 0;
    
-   WGPURenderPassDescriptor renderPassDesc;
+   WGPURenderPassDescriptor renderPassDesc = {};
    renderPassDesc.colorAttachmentCount = 1;
    renderPassDesc.colorAttachments = &colorAttachment;
    renderPassDesc.depthStencilAttachment = &depthAttachment; // Attach the depth texture
@@ -1050,7 +1082,7 @@ bool SDLState::loadShaderModule(const char* name, const char* code)
    }
 }
 
-static const size_t BufferSize = 1024*1024*1024;
+static const size_t BufferSize = 1024*1024;
 
 static inline size_t AlignSize(const size_t size, const uint16_t alignment)
 {
@@ -1074,6 +1106,8 @@ SDLState::BufferRef SDLState::allocBuffer(size_t size, uint32_t flags, uint16_t 
       ref.buffer = alloc.buffer;
       ref.offset = alloc.head;
       ref.size = size;
+      
+      alloc.head = nextSize;
       return ref;
    }
    
@@ -1083,6 +1117,7 @@ SDLState::BufferRef SDLState::allocBuffer(size_t size, uint32_t flags, uint16_t 
    bufferDesc.mappedAtCreation = false;
    
    BufferAlloc newAlloc = {};
+   newAlloc.flags = flags;
    newAlloc.size = bufferDesc.size;
    newAlloc.buffer = wgpuDeviceCreateBuffer(smState.gpuDevice, &bufferDesc);
    buffers.push_back(newAlloc);
@@ -1122,15 +1157,23 @@ void SDLState::endRenderPass()
    // Finish the command encoder to submit the work
    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(commandEncoder, NULL);
    
+   // NOTE: these both need to be released here otherwise wgpuQueueSubmit complains
+   
+   // Finished with this
+   wgpuRenderPassEncoderRelease(renderEncoder);
+   renderEncoder = NULL;
+   
+   // Finished with this
+   wgpuCommandEncoderRelease(commandEncoder);
+   commandEncoder = NULL;
+   
    // Submit the command buffer to the GPU queue
    wgpuQueueSubmit(gpuQueue, 1, &commandBuffer);
    
-   wgpuCommandBufferRelease(commandBuffer);   
-   wgpuRenderPassEncoderRelease(renderEncoder);
-   wgpuCommandEncoderRelease(commandEncoder);
+   //wgpuQueueOnSubmittedWorkDone(WGPUQueue queue, WGPUQueueOnSubmittedWorkDoneCallback callback, WGPU_NULLABLE void * userdata) WGPU_FUNCTION_ATTRIBUTE;
    
-   renderEncoder = NULL;
-   commandEncoder = NULL;
+   wgpuCommandBufferRelease(commandBuffer);
+   
    currentPipeline = NULL;
 }
 
@@ -1151,6 +1194,9 @@ void GFXTestRender(slm::vec3 pos)
 
 bool GFXBeginFrame()
 {
+   if (smState.commandEncoder)
+      return false;
+   
    for (SDLState::FrameModel& model : smState.models)
    {
       model.inFrame = false;
@@ -1190,32 +1236,46 @@ bool GFXBeginFrame()
 
    smState.beginRenderPass();
    
-   ImGui_ImplWGPU_NewFrame();
-   ImGui_ImplSDL3_NewFrame();
-   ImGui::NewFrame();
+   //ImGui_ImplWGPU_NewFrame();
+   //ImGui_ImplSDL3_NewFrame();
+   //ImGui::NewFrame();
    
    return true;
 }
 
 void GFXEndFrame()
 {
-   ImGui::EndFrame();
-   ImGui::Render();
-   ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), smState.renderEncoder);
+   //ImGui::EndFrame();
+   //ImGui::Render();
+   //ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), smState.renderEncoder);
+   //ImGui::
    
    smState.endRenderPass();
    
-   SDL_RenderPresent(smState.renderer);
+   if (smState.gpuSurfaceTexture.texture)
+   {
+      wgpuTextureRelease(smState.gpuSurfaceTexture.texture);
+      wgpuTextureViewRelease(smState.gpuSurfaceTextureView);
+      smState.gpuSurfaceTextureView = NULL;
+      smState.gpuSurfaceTexture = {};
+   }
+   
+   wgpuSurfacePresent(smState.gpuSurface);
 }
 
 void GFXHandleResize()
 {
    int w, h;
    SDL_GetWindowSize(smState.window, &w, &h);
-   smState.viewportSize = slm::vec2(w,h);
+   slm::vec2 newSize = slm::vec2(w,h);
    
-   // Recreate backing textures
-   
+   if (newSize != smState.viewportSize)
+   {
+      smState.viewportSize = newSize;
+      
+      // Reset swap chain
+      GFXResetSwapChain();
+   }
 }
 
 
@@ -1226,7 +1286,7 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
    uint32_t pow2H = getNextPow2(bmp->mHeight);
    WGPUTextureFormat pixFormat = WGPUTextureFormat_Undefined;
    
-   uint32_t alignedMipSize = AlignSize(pow2W*pow2H*4, 256);
+   uint32_t alignedMipSize = (uint32_t)AlignSize(pow2W*pow2H*4, 256);
    
    if (bmp->mBitDepth == 8)
    {
@@ -1238,6 +1298,7 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
          pal = defaultPal->getPaletteByIndex(bmp->mPaletteIndex);
       else
       {
+         printf("No default palette specified\n");
          assert(false);
          return false;
       }
@@ -1286,7 +1347,7 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
       // Create the texture view
       WGPUTextureViewDescriptor textureViewDesc = {};
       //textureViewDesc.label = "Texture View";
-      textureViewDesc.format = WGPUTextureFormat_RGBA8Unorm;  // Same as the texture format
+      textureViewDesc.format = bmp->mBGR ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;  // Same as the texture format
       textureViewDesc.dimension = WGPUTextureViewDimension_2D;
       textureViewDesc.mipLevelCount = 1;
       textureViewDesc.arrayLayerCount = 1;
@@ -1450,9 +1511,13 @@ void GFXSetModelVerts(uint32_t modelId, uint32_t vertOffset, uint32_t texOffset)
    SDLState::FrameModel& model = smState.models[modelId];
    const size_t vertSize = sizeof(ModelVertex) * model.numVerts;
    const size_t texVertSize = sizeof(ModelTexVertex) * model.numTexVerts;
+   const size_t indexSize = sizeof(uint16_t) * model.numInds;
    
    if (model.inFrame == false)
    {
+      model.indexOffset = smState.allocBuffer(model.numInds * sizeof(uint16_t), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index, sizeof(uint32_t));
+      wgpuQueueWriteBuffer(smState.gpuQueue, model.indexOffset.buffer, model.indexOffset.offset, model.indexData, indexSize);
+      
       model.vertOffset = smState.allocBuffer(vertSize, WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex, sizeof(ModelVertex));
       wgpuQueueWriteBuffer(smState.gpuQueue, model.vertOffset.buffer, model.vertOffset.offset, model.vertData, vertSize);
       
@@ -1463,6 +1528,8 @@ void GFXSetModelVerts(uint32_t modelId, uint32_t vertOffset, uint32_t texOffset)
       model.inFrame = true;
    }
    
+   wgpuRenderPassEncoderSetIndexBuffer(smState.renderEncoder, model.indexOffset.buffer, WGPUIndexFormat_Uint16, model.indexOffset.offset, model.numInds * sizeof(uint16_t));
+       
    wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 0, model.vertOffset.buffer, model.vertOffset.offset, vertSize);
    wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 1, model.texVertOffset.buffer, model.texVertOffset.offset, texVertSize);
 }

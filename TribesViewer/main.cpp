@@ -1744,6 +1744,7 @@ public:
             mPalette = newPal;
             clearTextures();
             if (mMaterialList) initMaterials();
+            return true;
          }
       }
       return false;
@@ -3109,7 +3110,10 @@ public:
          {
             mShape = ((Shape*)obj);
             mViewer.clear();
-            mViewer.setPalette(mPaletteName.c_str());
+            if (!mViewer.setPalette(mPaletteName.c_str()))
+            {
+               printf("Warning: cant load palette %s\n", mPaletteName.c_str());
+            }
             mViewer.loadShape(*mShape);
             
             uint32_t thr = mViewer.addThread();
@@ -3269,7 +3273,7 @@ public:
 };
 
 
-static const uint32_t tickMS = 1000.0 / 60;
+static const uint64_t tickMS = 1000.0 / 60;
 
 struct MainState
 {
@@ -3282,7 +3286,7 @@ struct MainState
    slm::vec3 deltaMovement;
    slm::vec3 deltaRot;
    slm::vec3 testPos;
-   uint32_t lastTicks;
+   uint64_t lastTicks;
    
    int selectedFileIdx;
    int selectedVolumeIdx;
@@ -3492,8 +3496,8 @@ int MainState::loop()
    
    SDL_Event event;
 
-   uint32_t curTicks = SDL_GetTicks();
-   uint32_t oldLastTicks = lastTicks;
+   uint64_t curTicks = SDL_GetTicks();
+   uint64_t oldLastTicks = lastTicks;
    float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
    lastTicks = curTicks;
    
@@ -3599,7 +3603,7 @@ int MainState::loop()
       lastTicks = oldLastTicks;
    }
    
-   uint32_t endTicks = SDL_GetTicks();
+   uint64_t endTicks = SDL_GetTicks();
    if (endTicks - lastTicks < tickMS)
    {
       SDL_Delay(tickMS - (endTicks - lastTicks));
@@ -3621,7 +3625,7 @@ int MainState::testLoop()
    if (!running)
       return 1;
 
-   uint32_t curTicks = SDL_GetTicks();
+   uint64_t curTicks = SDL_GetTicks();
    float dt = ((float)(curTicks - lastTicks)) / 1000.0f;
    lastTicks = curTicks;
    
