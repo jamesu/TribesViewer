@@ -3329,11 +3329,12 @@ struct MainState
    
    void init(SDL_Window* in_window, int argc, const char** argv)
    {
-      shapeController = new ShapeViewerController(window, &resManager);
-      interiorController = new InteriorViewerController(window, &resManager);
+      window = in_window;
       in_argc = argc;
       in_argv = argv;
-      window = in_window;
+      
+      shapeController = new ShapeViewerController(window, &resManager);
+      interiorController = new InteriorViewerController(window, &resManager);
    }
    
    int boot();
@@ -3410,7 +3411,6 @@ void MainState::shutdown()
    }
    
    GFXTeardown();
-   gMainState.shutdown();
    SDL_DestroyWindow( gMainState.window );
    SDL_Quit();
 }

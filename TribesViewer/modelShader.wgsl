@@ -51,7 +51,7 @@ fn mainVert(input: VertexInput) -> VertexOutput {
 fn mainFrag(input: VertexOutput) -> FragmentOutput {
     var color: vec4<f32> = textureSample(texture0, sampler0, input.vTexCoord0);
 
-    if (color.a <= commonUniforms.params2.x) {
+    if (color.a > commonUniforms.params2.x) {
         discard;
     }
 

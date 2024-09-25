@@ -256,30 +256,30 @@ static LineProgramInfo buildLineProgram()
    // Position attribute
    vertexAttributes[0] = {};
    vertexAttributes[0].format = WGPUVertexFormat_Float32x3;
-   vertexAttributes[0].offset = offsetof(LineVertex, position);
+   vertexAttributes[0].offset = offsetof(_LineVert, pos);
    vertexAttributes[0].shaderLocation = 0; // Corresponding to `position` in the shader
    
    // Next position attribute
    vertexAttributes[1] = {};
    vertexAttributes[1].format = WGPUVertexFormat_Float32x3;
-   vertexAttributes[1].offset = offsetof(LineVertex, nextPosition);
+   vertexAttributes[1].offset = offsetof(_LineVert, nextPos);
    vertexAttributes[1].shaderLocation = 1; // Corresponding to `nextPosition` in the shader
    
    // Normal attribute
    vertexAttributes[2] = {};
    vertexAttributes[2].format = WGPUVertexFormat_Float32x3;
-   vertexAttributes[2].offset = offsetof(LineVertex, normal);
+   vertexAttributes[2].offset = offsetof(_LineVert, normal);
    vertexAttributes[2].shaderLocation = 2; // Corresponding to `normal` in the shader
    
    // Color attribute
    vertexAttributes[3] = {};
    vertexAttributes[3].format = WGPUVertexFormat_Float32x4;
-   vertexAttributes[3].offset = offsetof(LineVertex, color);
+   vertexAttributes[3].offset = offsetof(_LineVert, color);
    vertexAttributes[3].shaderLocation = 3; // Corresponding to `color` in the shader
    
    // Define the vertex buffer layout
    WGPUVertexBufferLayout vertexBufferLayout = {};
-   vertexBufferLayout.arrayStride = sizeof(LineVertex);
+   vertexBufferLayout.arrayStride = sizeof(_LineVert);
    vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex; // Per-vertex data
    vertexBufferLayout.attributeCount = 4;
    vertexBufferLayout.attributes = vertexAttributes;
@@ -476,7 +476,6 @@ ProgramInfo buildProgram()
             break;
       };
       
-      colorTargetState.blend = &blendState;
       colorTargetState.writeMask = WGPUColorWriteMask_All;
       
       fragmentState.targets = &colorTargetState;
@@ -486,7 +485,7 @@ ProgramInfo buildProgram()
       primitiveState.topology = WGPUPrimitiveTopology_TriangleList; // Rendering triangles
       primitiveState.stripIndexFormat = WGPUIndexFormat_Undefined;  // Non-indexed drawing
       primitiveState.frontFace = WGPUFrontFace_CW;                 // Counter-clockwise vertices define the front face
-      primitiveState.cullMode = WGPUCullMode_Back;                  // Back-face culling
+      primitiveState.cullMode = WGPUCullMode_None;//WGPUCullMode_Back;                  // Back-face culling
       
       // Multisample state
       WGPUMultisampleState multisampleState = {};
@@ -1268,6 +1267,8 @@ void GFXEndFrame()
    }
    
    wgpuSurfacePresent(smState.gpuSurface);
+   
+   smState.resetBufferAllocs();
 }
 
 void GFXHandleResize()
@@ -1454,8 +1455,8 @@ void GFXLoadModelData(uint32_t modelId, void* verts, void* texverts, void* inds,
    model.numInds = numInds;
    
    memcpy(model.vertData, verts, sizeof(ModelVertex) * numVerts);
-   memcpy(model.texVertData, verts, sizeof(ModelTexVertex) * numTexVerts);
-   memcpy(model.indexData, verts, sizeof(uint16_t) * numInds);
+   memcpy(model.texVertData, texverts, sizeof(ModelTexVertex) * numTexVerts);
+   memcpy(model.indexData, inds, sizeof(uint16_t) * numInds);
 }
 
 void GFXSetModelViewProjection(slm::mat4 &model, slm::mat4 &view, slm::mat4 &proj)
@@ -1530,7 +1531,7 @@ void GFXSetModelVerts(uint32_t modelId, uint32_t vertOffset, uint32_t texOffset)
       wgpuQueueWriteBuffer(smState.gpuQueue, model.vertOffset.buffer, model.vertOffset.offset, model.vertData, vertSize);
       
       model.texVertOffset = smState.allocBuffer(texVertSize, WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex, sizeof(ModelTexVertex));
-      wgpuQueueWriteBuffer(smState.gpuQueue, model.texVertOffset.buffer, model.texVertOffset.offset, model.vertData, texVertSize);
+      wgpuQueueWriteBuffer(smState.gpuQueue, model.texVertOffset.buffer, model.texVertOffset.offset, model.texVertData, texVertSize);
       
       // Load in frame
       model.inFrame = true;
@@ -1563,7 +1564,7 @@ void GFXBeginLinePipelineState()
 }
 
 void GFXDrawLine(slm::vec3 start, slm::vec3 end, slm::vec4 color, float width)
-{return;
+{
    _LineVert verts[6];
    verts[0].pos = start;
    verts[0].nextPos = end;
@@ -1591,12 +1592,12 @@ void GFXDrawLine(slm::vec3 start, slm::vec3 end, slm::vec4 color, float width)
    verts[5].normal = slm::vec3(1,0,0); // b
    verts[5].color = color;
    
-   smState.lineProgram.uniforms.params1 = slm::vec4(smState.viewportSize.x, smState.viewportSize.y, width, 0.0f);
+   smState.lineProgram.uniforms.params1 = slm::vec4(1.0f / smState.viewportSize.x, 1.0f / smState.viewportSize.y, width, 0.0f);
    
    SDLState::BufferRef uniformData = smState.allocBuffer(sizeof(CommonUniformStruct), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform, 256);
    wgpuQueueWriteBuffer(smState.gpuQueue, uniformData.buffer, uniformData.offset, &smState.lineProgram.uniforms, sizeof(CommonUniformStruct));
    
-   SDLState::BufferRef lineData = smState.allocBuffer(sizeof(_LineVert), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex, sizeof(_LineVert));
+   SDLState::BufferRef lineData = smState.allocBuffer(sizeof(verts), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex, sizeof(_LineVert));
    wgpuQueueWriteBuffer(smState.gpuQueue, lineData.buffer, lineData.offset, verts, sizeof(verts));
    
    uint32_t offsets[1];
