@@ -595,7 +595,7 @@ public:
 private:
     uint16_t getbuf, getlen, putbuf, putlen;
     int textsize, codesize, printcount, match_position, match_length;
-    std::vector<int> lson, dad, rson, text_buf;
+    std::vector<int> text_buf;
     std::vector<int> freq, prnt, son;
 
     static const uint8_t D_CODE[256];

@@ -452,20 +452,29 @@ void LZH::lzh_unpack(int text_size, MemRStream& in_stream, MemRStream& out_strea
    text_buf.assign(BUF_SIZE + LOOK_AHEAD - 1, 0);
    int count = 0;
    
-   while (count < text_size) {
+   while (count < text_size) 
+   {
       int c = decode_char(in_stream);
-      if (c < 256) {
+      //printf("DECODE_CHAR %u\n", c);
+      if (c < 256)
+      {
          uint8_t cv = static_cast<uint8_t>(c);
+         //printf("YIP %u\n", c);
          out_stream.write(cv);
          text_buf[r] = c;
          r = (r + 1) & (BUF_SIZE - 1);
          count++;
-      } else {
+      } 
+      else
+      {
+         //printf("YAP\n");
          int i = (r - decode_position(in_stream) - 1) & (BUF_SIZE - 1);
          int j = c - 255 + THRESHOLD;
          for (int k = 0; k < j; ++k) {
-            c = text_buf[(i + k) & (BUF_SIZE - 1)];
+            const int rb_pos = (i + k) & (BUF_SIZE - 1);
+            c = text_buf[rb_pos];
             uint8_t cv = static_cast<uint8_t>(c);
+            //printf("WRITE %u\n", c);
             out_stream.write(cv);
             text_buf[r] = c;
             r = (r + 1) & (BUF_SIZE - 1);
@@ -493,7 +502,8 @@ void LZH::start_huff()
    prnt.assign(TABLE_SIZE + N_CHAR, 0);
    son.assign(TABLE_SIZE, 0);
    
-   for (int i = 0; i < N_CHAR; i++) {
+   for (int i = 0; i < N_CHAR; i++)
+   {
       freq[i] = 1;
       son[i] = (i + TABLE_SIZE) & 0xFFFF;
       prnt[i + TABLE_SIZE] = i;
@@ -501,7 +511,8 @@ void LZH::start_huff()
    
    int i = 0;
    int j = N_CHAR;
-   while (j <= ROOT) {
+   while (j <= ROOT) 
+   {
       freq[j] = freq[i] + freq[i + 1];
       son[j] = i & 0xFFFF;
       prnt[i] = prnt[i + 1] = j;
@@ -516,7 +527,8 @@ void LZH::start_huff()
 int LZH::decode_char(MemRStream& ios)
 {
    int c = son[ROOT];
-   while (c < TABLE_SIZE) {
+   while (c < TABLE_SIZE) 
+   {
       c += get_bit(ios);
       c = son[c];
    }
@@ -545,27 +557,36 @@ int LZH::get_byte(MemRStream& ios)
    return byte >> 8;
 }
 
+static uint32_t pcount = 0;
 int LZH::decode_position(MemRStream& ios)
 {
    int i = get_byte(ios);
+   int ob = i;
    int j = decode_dlen(i);
    int c = D_CODE[i] << 6;
    
    j -= 2;
-   for (int k = 0; k < j; ++k) {
+   for (int k = 0; k < j; ++k) 
+   {
       i = (i << 1) + get_bit(ios);
    }
+   
+   //printf("DecodePosition %u -> %u [byte=%u len=%u]\n", pcount, c, ob, decode_dlen(ob));
+   pcount++;
+   
    return c | (i & 0x3f);
 }
 
 void LZH::refill_byte_buf(MemRStream& ios)
 {
-   while (getlen <= 8) {
+   while (getlen <= 8)
+   {
       uint8_t byte;
-      if (!ios.read(byte)) {
+      if (!ios.read(byte))
+      {
          byte = 0;
       }
-      getbuf |= static_cast<uint8_t>(byte) << (8 - getlen);
+      getbuf |= static_cast<uint16_t>(byte) << (8 - getlen);
       getbuf &= 0xFFFF;
       getlen += 8;
    }
@@ -573,16 +594,20 @@ void LZH::refill_byte_buf(MemRStream& ios)
 
 void LZH::update(int c)
 {
-   if (freq[ROOT] == MAX_FREQ) {
+   if (freq[ROOT] == MAX_FREQ)
+   {
       reconst();
    }
    
    c = prnt[c + TABLE_SIZE];
-   do {
+   do
+   {
       freq[c]++;
       int k = freq[c];
       int l = c + 1;
-      if (k > freq[l]) {
+      
+      if (k > freq[l])
+      {
          while (k > freq[l]) l++;
          l--;
          std::swap(freq[c], freq[l]);
@@ -602,32 +627,44 @@ void LZH::update(int c)
 
 void LZH::reconst()
 {
+   //printf("RECONST\n");
    int j = 0;
-   for (int i = 0; i < TABLE_SIZE; i++) {
-      if (son[i] >= TABLE_SIZE) {
+   for (int i = 0; i < TABLE_SIZE; i++)
+   {
+      if (son[i] >= TABLE_SIZE)
+      {
          freq[j] = (freq[i] + 1) >> 1;
          son[j] = son[i];
          j++;
       }
    }
    int i = 0;
-   for (int j = N_CHAR; j < TABLE_SIZE; j++) {
+   for (int j = N_CHAR; j < TABLE_SIZE; j++)
+   {
       int k = i + 1;
       int f = freq[j] = freq[i] + freq[k];
       k = j - 1;
       while (f < freq[k] && k >= 0) k--;
       k++;
-      int l = (j - k) * 2;
-      std::copy_backward(freq.begin() + k, freq.begin() + j, freq.begin() + k + l + 1);
+      
+      int l = (j - k) * sizeof(freq[0]);
+      
+      memmove(&freq[k+1], &freq[k], l);
+      memmove(&son[k+1], &son[k], l);
+      
       freq[k] = f;
-      std::copy_backward(son.begin() + k, son.begin() + j, son.begin() + k + l + 1);
       son[k] = i;
       i += 2;
    }
-   for (int i = 0; i < TABLE_SIZE; i++) {
+   for (int i = 0; i < TABLE_SIZE; i++)
+   {
       int k = son[i];
-      if (k >= TABLE_SIZE) prnt[k] = i;
-      else {
+      if (k >= TABLE_SIZE)
+      {
+         prnt[k] = i;
+      }
+      else
+      {
          prnt[k] = i;
          prnt[k + 1] = i;
       }

@@ -1407,9 +1407,13 @@ public:
    
    void readCompressed(MemRStream& mem, uint32_t size, void* out)
    {
-      MemRStream outMem(size, out);
+      uint32_t compressed_size = 0;
+      mem.read(compressed_size);
+      uint32_t read_compressed_size = std::min<uint32_t>(compressed_size, size);
+      MemRStream outMem(read_compressed_size, out);
       LZH lzh;
-      lzh.lzh_unpack(size, mem, outMem);
+      lzh.lzh_unpack(read_compressed_size, mem, outMem);
+      assert(read_compressed_size == compressed_size);
    }
    
    bool read(MemRStream &mem)
@@ -1513,7 +1517,7 @@ public:
             uint16_t sz = 0;
             mem.read(sz);
             mPinMap[i].resize(sz);
-            mem.read(sz, &mPinMap[0]);
+            mem.read(sz, &mPinMap[i][0]);
          }
       }
       else
@@ -1725,6 +1729,10 @@ inline void TerrainBlockList::loadBlocks(ResManager& mgr, const char* baseName, 
             delete info.instance;
             info.instance = NULL;
          }
+         else
+         {
+            info.instance->buildGridMap();
+         }
       }
    }
 }
@@ -1738,6 +1746,11 @@ inline void TerrainBlockList::setSingleBlock(TerrainBlock* block)
    mScale = 3; // i.e. 8 units per square
    mSize[0] = 1;
    mSize[1] = 1;
+   
+   if (block)
+   {
+      block->buildGridMap();
+   }
 }
 
 class Shape : public DarkstarPersistObject
@@ -3971,6 +3984,7 @@ public:
          }
       }
       
+      mViewer.setPalette(mPaletteName.c_str());
       mViewer.updateMaterials();
    }
    
