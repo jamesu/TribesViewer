@@ -57,7 +57,7 @@ fn mainVert(input: VertexInput) -> VertexOutput {
     clipSpace += vec4<f32>(realDelta.xy * commonUniforms.params1.xy, 0.0, 0.0);
     clipSpace.z = 1.0;
 
-    if (projStartPos.w < 0) {
+    if (projStartPos.w < 0.01) {
         clipSpace.w = -1.0;
     } else {
         clipSpace.w = 1.0;

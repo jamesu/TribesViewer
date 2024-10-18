@@ -198,6 +198,85 @@ public:
       }
    }
    
+   inline bool readSString32(std::string &outS)
+   {
+      uint32_t size;
+      if (!read(size)) return false;
+      
+      char *str = new char[size+1];
+      if (read(size, str))
+      {
+         str[size] = '\0';
+         outS = str;
+         delete[] str;
+         return true;
+      }
+      else
+      {
+         delete[] str;
+         return false;
+      }
+   }
+   
+   // WRITE
+   
+   // For array types
+   template<class T, int N> inline bool write( T (&value)[N] )
+   {
+      if (mPos >= mSize || mPos+(sizeof(T)*N) > mSize)
+         return false;
+      
+      memcpy(mPtr+mPos, &value, sizeof(T)*N);
+      mPos += sizeof(T)*N;
+      
+      return true;
+   }
+   
+   // For normal scalar types
+   template<typename T> inline bool write(T &value)
+   {
+      T* tptr = (T*)(mPtr+mPos);
+      if (mPos >= mSize || mPos+sizeof(T) > mSize)
+         return false;
+      
+      *tptr = value;
+      mPos += sizeof(T);
+      
+      return true;
+   }
+   
+   inline bool write(uint32_t size, void* data)
+   {
+      if (mPos >= mSize || mPos+size > mSize)
+         return false;
+      
+      memcpy(mPtr+mPos, data, size);
+      mPos += size;
+      
+      return true;
+   }
+   
+   inline bool writeSString(std::string &outS)
+   {
+      uint16_t size = (uint16_t)outS.size();
+      if (!write(size)) return false;
+      
+      int real_size = (size + 1) & (~1); // dword padded
+      char *str = new char[real_size+1];
+      if (read(real_size, str))
+      {
+         str[real_size] = '\0';
+         outS = str;
+         delete[] str;
+         return true;
+      }
+      else
+      {
+         delete[] str;
+         return false;
+      }
+   }
+   
    inline void setPosition(uint32_t pos)
    {
       if (pos > mSize)
@@ -495,5 +574,52 @@ inline void copyMipRGBA(uint32_t width, uint32_t height, uint32_t pad_width, Pal
       }
    }
 }
+
+
+class LZH {
+public:
+    static constexpr int BUF_SIZE = 4096;
+    static constexpr int LOOK_AHEAD = 60;
+    static constexpr int THRESHOLD = 2;
+    static constexpr int NUL = BUF_SIZE;
+    static constexpr int N_CHAR = (256 - THRESHOLD + LOOK_AHEAD);
+    static constexpr int TABLE_SIZE = (N_CHAR * 2 - 1);
+    static constexpr int ROOT = (TABLE_SIZE - 1);
+    static constexpr int MAX_FREQ = 0x8000;
+
+    LZH() : getbuf(0), getlen(0), putbuf(0), putlen(0), textsize(0), codesize(0),
+            printcount(0), match_position(0), match_length(0) {}
+
+   void lzh_unpack(int text_size, MemRStream& in_stream, MemRStream& out_stream);
+
+private:
+    uint16_t getbuf, getlen, putbuf, putlen;
+    int textsize, codesize, printcount, match_position, match_length;
+    std::vector<int> lson, dad, rson, text_buf;
+    std::vector<int> freq, prnt, son;
+
+    static const uint8_t D_CODE[256];
+
+    void init_huff_and_tree();
+    void start_huff();
+    int decode_char(MemRStream& ios);
+    int get_bit(MemRStream& ios);
+    int get_byte(MemRStream& ios);
+
+    inline int decode_dlen(int i)
+    {
+        if (i < 32) return 3;
+        else if (i < 80) return 4;
+        else if (i < 144) return 5;
+        else if (i < 192) return 6;
+        else if (i < 240) return 7;
+        else return 8;
+    }
+
+    int decode_position(MemRStream& ios);
+    void refill_byte_buf(MemRStream& ios);
+    void update(int c);
+    void reconst();
+};
 
 #endif /* SharedRender_h */

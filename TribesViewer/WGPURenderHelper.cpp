@@ -1,5 +1,5 @@
 //-----------------------------------------------------------------------------
-// Copyright (c) 2018 James S Urquhart.
+// Copyright (c) 2018-2024 James S Urquhart.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -1457,6 +1457,30 @@ void GFXLoadModelData(uint32_t modelId, void* verts, void* texverts, void* inds,
    memcpy(model.vertData, verts, sizeof(ModelVertex) * numVerts);
    memcpy(model.texVertData, texverts, sizeof(ModelTexVertex) * numTexVerts);
    memcpy(model.indexData, inds, sizeof(uint16_t) * numInds);
+}
+
+void GFXClearModelData(uint32_t modelId)
+{
+   if (smState.models.size() <= modelId)
+      return;
+   
+   SDLState::FrameModel& model = smState.models[modelId];
+   model.inFrame = false;
+   
+   if (model.vertData)
+      delete[] model.vertData;
+   if (model.texVertData)
+      delete[] model.texVertData;
+   if (model.indexData)
+      delete[] model.indexData;
+   
+   model.vertData = NULL;
+   model.texVertData = NULL;
+   model.indexData = NULL;
+   
+   model.numVerts = 0;
+   model.numTexVerts = 0;
+   model.numInds = 0;
 }
 
 void GFXSetModelViewProjection(slm::mat4 &model, slm::mat4 &view, slm::mat4 &proj)

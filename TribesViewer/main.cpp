@@ -1,5 +1,5 @@
 //-----------------------------------------------------------------------------
-// Copyright (c) 2018 James S Urquhart.
+// Copyright (c) 2018-2024 James S Urquhart.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -1106,6 +1106,639 @@ public:
    
 };
 
+class TerrainBlock;
+
+class TerrainBlockList
+{
+public:
+   enum
+   {
+      IDENT_GFIL = 1279870535
+   };
+   
+   std::string mBaseName;
+   std::string mMLName;
+   uint32_t mLastBlockID;
+   uint32_t mDetailCount; // max detail levels we can use; also related shift value for int coords
+   uint32_t mScale;       // shift value for int coords
+   
+   // NOTE: bounds appears to be unused
+   slm::vec3 mMinBounds;
+   slm::vec3 mMaxBounds;
+
+   uint32_t mOrigin[2]; // seems to be an offset for the blocks, but not used for collision?
+   uint32_t mSize[2];   // grid block dimensions
+   
+   struct BlockInfo
+   {
+      uint32_t ident;
+      std::string name;
+      TerrainBlock* instance;
+      
+      BlockInfo()
+      {
+         ident = 0;
+         name = "";
+         instance = NULL;
+      }
+   };
+   
+   slm::vec2 mGridRange;
+   std::vector<int> mBlockMap;
+   std::vector<BlockInfo> mBlocks;
+
+   enum BlockMap : uint32_t {
+      BM_OneToAll,
+      BM_Unique,
+      BM_Mosaic
+   };
+
+   BlockMap mBlockMapType;
+
+   TerrainBlockList()
+   {
+      mLastBlockID = 0;
+      mDetailCount = 0;
+      mScale = 0;
+      mMinBounds = slm::vec3(0);
+      mMaxBounds = slm::vec3(0);
+      mOrigin[0] = 0;
+      mOrigin[1] = 0;
+      mSize[0] = 0;
+      mSize[1] = 0;
+      mGridRange = slm::vec2(0);
+      mBlockMapType = BM_OneToAll;
+   }
+   
+   virtual ~TerrainBlockList();
+   
+   inline uint32_t getNumBlocks() const
+   {
+      return mSize[0] * mSize[1];
+   }
+   
+   inline uint32_t getBlockIndex(int32_t x, int32_t y) const
+   {
+      return (y * mSize[0]) + x;
+   }
+   
+   inline int32_t getBaseShift() const
+   {
+      return ((int32_t)mDetailCount - 1);
+   }
+   
+   inline int32_t getBlockShift() const
+   {
+      // NOTE: shift right to go from world -> local,
+      //       shift left to go from local -> world.
+      return ((int32_t)mDetailCount - 1) + // base
+             mScale; // square size
+   }
+   
+   void loadBlocks(ResManager& mgr, const char* baseName, int volIdx = -1);
+   void setSingleBlock(TerrainBlock* block);
+   
+   bool read(MemRStream &mem)
+   {
+      uint32_t lastID;
+      uint32_t numDetails;
+      uint32_t scale;
+      uint32_t version;
+      
+      IFFBlock block;
+      mem.read(block);
+      if (block.ident != IDENT_GFIL)
+      {
+         return false;
+      }
+      
+      mem.read(version);
+      if (version > 1)
+      {
+         return false;
+      }
+      
+      mem.readSString32(mMLName);
+      mem.read(mLastBlockID);
+      mem.read(mDetailCount);
+      mem.read(mScale);
+
+      mem.read(mMinBounds);
+      mem.read(mMaxBounds);
+      mem.read(mOrigin[0]);
+      mem.read(mOrigin[1]);
+      mem.read(mGridRange);
+      mem.read(mSize[0]);
+      mem.read(mSize[1]);
+
+      if (version > 0)
+      {
+         mem.read(mBlockMapType);
+      }
+      else
+      {
+         mBlockMapType = BM_OneToAll;
+      }
+
+      uint32_t numBlocks = getNumBlocks();
+      mBlockMap.resize(numBlocks);
+      mem.read(numBlocks * sizeof(uint32_t), &mBlockMap[0]);
+      
+      numBlocks = 0;
+      mem.read(numBlocks);
+      mBlocks.resize(numBlocks);
+      for (uint32_t i=0; i<numBlocks; i++)
+      {
+         mem.read(mBlocks[i].ident);
+         mem.readSString(mBlocks[i].name);
+      }
+      
+      return true;
+   }
+};
+
+/*
+ NOTE: Internally each grid block in tribes is just a heightmap sized as [y+1][x+1], but with
+ [x][y] squares. Most commonly, a 257x257 heightmap with 256x256 squares.
+ This is slightly different to torque which uses a fixed 256x256 heightmap which
+ repeats (i.e. the height for the right of square 255 is the same as height 0).
+ 
+ For a square at (x,y) the corners use the following heightmap values:
+ 
+ (x+0,y+0)-----(x+0,y+0)
+ |                     |
+ |                     |
+ |                     |
+ |                     |
+ |                     |
+ (x+0,y+1)-----(x+1,y+1)
+ 
+ When handling detail levels, each detail level skips a power of two heightmap values.
+ Squares are split at different diagonals using a checkerboard pattern.
+ 
+ Also of note, each square consists of 4 points in the highest detail and 9 in the subsequent detail levels.
+ This helps smooth things out in the lower detail levels.
+ 
+ NOTE: Curiously, when SimT2 is present in a mission, Tribes terrain is rendered similar to torques
+ terrain block (i.e. with the grid map and the advanced detail levels); otherwise the
+ simpler system is used.
+ In both cases the underlying geometry of the terrain used for collision is the same.
+ 
+ Bitmaps from the associated material list are used to texture each terrain square; unlike
+ torque, no advanced blending occurs at runtime thus there is no extra info like the material alpha map.
+ Each square just uses the texture as-is with relevant flips and rotations applied to the texcoords.
+ */
+class TerrainBlock
+{
+public:
+   enum
+   {
+      IDENT_GBLK = 1263288903
+   };
+   
+   struct MaterialMap
+   {
+      uint8_t flag;
+      uint8_t matIndex;
+      
+      enum
+      {
+         Plain = 0,
+         Rotate = 1,
+         FlipX = 2,
+         FlipY = 4,
+         RotateMask = 7,
+         //
+         EmptyShift = 3,
+         EmptyMask = 7
+      };
+      
+      // 0 = not empty, otherwise marks how many details this is empty for.
+      int32_t getEmptyDetailLevel()
+      {
+         return (flag >> EmptyShift) & EmptyMask;
+      }
+      
+      static slm::vec2 sMatCoords[8][4];
+      
+      /*
+       NOTE: texture coords are arranged as follows (assuming opengl convention):
+       
+       0  7  6
+       1  8  5
+       2  3  4
+       
+       Modifier ops occur in the order FlipX, FlipY, Rotate.
+       FlipX & FlipY are straight forward.
+       Rotate does a clockwise rotation of outer points i.e:
+       
+       2  1  0
+       3  8  7
+       4  5  6
+       
+       Level 0 squares use the outer points, while subsequent detail levels use all the points.
+       In addition the relevant square offset is applied for subsequent details.
+       */
+      static void getBaseTexCoords(uint32_t flag, slm::vec2* outCoords)
+      {
+         uint8_t idx = flag & RotateMask;
+         outCoords[0] = sMatCoords[idx][0];
+         outCoords[1] = sMatCoords[idx][1];
+         outCoords[2] = sMatCoords[idx][2];
+         outCoords[3] = sMatCoords[idx][3];
+      }
+      
+   };
+   
+   struct GridSquare
+   {
+      uint16_t flags;
+      
+      enum
+      {
+         Split45 = 1,
+         Empty = 2,
+         HasEmpty = 4
+      };
+   };
+   
+   TerrainBlockList* mOwner;
+   
+   std::string mIdent;
+   int32_t mDetailCount; // number of detail levels to use
+   int32_t mLightScale;  // shift for lightmap
+   slm::vec2 mRange;     // height range
+   int32_t mSize[2];     // heightmap dimensions
+   
+   std::vector<float> mHeightMap;
+   std::vector<MaterialMap> mMatMap;
+   std::vector<GridSquare> mGridMapBase;
+   std::vector<uint8_t> mPinMap[11];
+   std::vector<uint16_t> mLightMap;
+   
+   
+   TerrainBlock(TerrainBlockList* owner = NULL) : mOwner(owner)
+   {
+   }
+   
+   virtual ~TerrainBlock()
+   {
+   }
+   
+   inline uint32_t getLightMapWidth() const
+   {
+      return (mSize[0] << mLightScale) + 1;
+   }
+   
+   inline uint32_t getHeightMapSize() const
+   {
+      return (mSize[0] + 1) * (mSize[1] + 1);
+   }
+   
+   inline uint32_t getMatMapSize() const
+   {
+      return (mSize[0]) * (mSize[1]);
+   }
+   
+   float getHeight(uint32_t x, uint32_t y)
+   {
+      return mHeightMap[(y*mSize[0]) + x];
+   }
+   
+   void readCompressed(MemRStream& mem, uint32_t size, void* out)
+   {
+      MemRStream outMem(size, out);
+      LZH lzh;
+      lzh.lzh_unpack(size, mem, outMem);
+   }
+   
+   bool read(MemRStream &mem)
+   {
+      IFFBlock block;
+      mem.read(block);
+      if (block.ident != IDENT_GBLK)
+      {
+         return false;
+      }
+      
+      uint32_t version = 0;
+      mem.read(version);
+      if (version > 5)
+      {
+         return false;
+      }
+
+      char ident[17];
+      memset(ident, 0, sizeof(ident));
+      mem.read(16, &ident[0]);
+      mIdent = ident;
+      
+      mem.read(mDetailCount);
+      mem.read(mLightScale);
+      mem.read(mRange.x);
+      mem.read(mRange.y);
+      mem.read(mSize[0]);
+      mem.read(mSize[1]);
+      
+      // Height map
+      uint32_t hmSize = getHeightMapSize();
+      mHeightMap.resize(hmSize);
+      
+      if (version == 0)
+      {
+         mem.read(hmSize * 4, &mHeightMap[0]);
+      }
+      else if (version < 4)
+      {
+         // Row compression
+         mHeightMap.resize(getHeightMapSize());
+         const uint32_t rowSize = mSize[0] + 1;
+         
+         // leading row
+         float* outRow  = &mHeightMap[0];
+         mem.read(4 * rowSize, outRow);
+         outRow += rowSize;
+         
+         std::vector<int8_t> offsets;
+         offsets.resize(mSize[0]-1);
+         
+         for (uint32_t i=1; i<mSize[1]; i++)
+         {
+            float scale = 1.0f;
+            float lheight = 1.0f;
+            mem.read(scale);
+            mem.read(lheight);
+            mem.read(mSize[0]-1, &offsets[0]);
+            
+            // leading height
+            *outRow++ = lheight;
+            
+            // offsets
+            for (int8_t offset : offsets)
+            {
+               lheight += offset * scale;
+               *outRow++ = lheight;
+            }
+            
+            // trailing height
+            mem.read(lheight);
+            *outRow++ = lheight;
+         }
+         
+         // trailing row
+         mem.read(4 * rowSize, outRow);
+      }
+      else
+      {
+         readCompressed(mem, 4 * getHeightMapSize(), &mHeightMap[0]);
+      }
+
+      // Material map
+      mMatMap.resize(getMatMapSize());
+      
+      if (version > 4)
+      {
+         readCompressed(mem, 2 * getMatMapSize(), &mMatMap[0]);
+      }
+      else
+      {
+         mem.read(2 * getMatMapSize(), &mMatMap[0]);
+      }
+      
+      // Pin map
+      if (version >= 2)
+      {
+         for (uint32_t i=0; i<11; i++)
+         {
+            uint16_t sz = 0;
+            mem.read(sz);
+            mPinMap[i].resize(sz);
+            mem.read(sz, &mPinMap[0]);
+         }
+      }
+      else
+      {
+         for (uint32_t i=0; i<11; i++)
+         {
+            mPinMap[i].resize(0);
+         }
+      }
+
+      if (mLightScale >= 0)
+      {
+         uint32_t lmWidth = getLightMapWidth();
+         mLightMap.resize(lmWidth*lmWidth);
+         
+         if (version > 4)
+         {
+            readCompressed(mem, lmWidth*lmWidth*2, &mLightMap[0]);
+         }
+         else
+         {
+            mem.read(lmWidth*lmWidth*2, &mLightMap[0]);
+         }
+      }
+      else
+      {
+         mLightMap.resize(0);
+      }
+
+      if (version > 4)
+      {
+         uint32_t hrlmSize;
+         mem.read(hrlmSize);
+         
+         if (hrlmSize > 0)
+         {
+            // Can't read HiRes lightmap data
+            return false;
+            // mem.read(hrlmSize, &mHiResLightmap[0]);
+         }
+      }
+      
+      uint32_t hrlmVersion = 0;
+      uint32_t numHrlm = 0;
+      
+      if (version >= 3)
+      {
+         mem.read(hrlmVersion);
+         
+         if (hrlmVersion > 0)
+         {
+            mem.read(numHrlm);
+         }
+         else
+         {
+            numHrlm = 0;
+         }
+      }
+
+      if (version == 3)
+      {
+         uint32_t cPoolSz = 0;
+         uint32_t idxSz = 0;
+         uint32_t treeSz = 0;
+         
+         mem.read(cPoolSz);
+         mem.read(idxSz);
+         mem.read(treeSz);
+         
+         if (cPoolSz > 0)
+         {
+            // Can't read HiRes lightmap data
+            return false;
+         }
+      }
+      
+      return true;
+   }
+   
+   inline GridSquare* findSquare(int32_t x, int32_t y)
+   {
+      return (&mGridMapBase[0] +
+               (x) +
+               (y * mSize[0]));
+   }
+   
+   inline MaterialMap* getMaterialMap(int32_t x, int32_t y)
+   {
+      return (&mMatMap[0] +
+               (x) +
+               (y * mSize[0]));
+   }
+   
+   void buildGridMap()
+   {
+      mGridMapBase.resize(mSize[0] * mSize[1]);
+      processGrid();
+   }
+   
+   void processGrid()
+   {
+      for (int32_t squareX = 0; squareX < mSize[0]; squareX++)
+      {
+          for (int32_t squareY = 0; squareY < mSize[1]; squareY++)
+          {
+              GridSquare* sq = findSquare(squareX, squareY);
+              processSquare(squareX, squareY, sq);
+          }
+      }
+   }
+   
+   void processSquare(int32_t squareX, int32_t squareY, GridSquare* sq)
+   {
+      // NOTE: since we're just rendering the base level here we just factor in whats set in the square
+      TerrainBlock::MaterialMap* mat = getMaterialMap(squareX, squareY);
+      
+      bool emptySet = (mat->flag & TerrainBlock::GridSquare::Empty) != 0;
+      bool shouldSplit45 = ((squareX ^ squareY) & 1) == 0;
+      
+      sq->flags = emptySet ? (GridSquare::Empty | GridSquare::HasEmpty) : 0;
+      
+      if (shouldSplit45)
+      {
+          sq->flags |= GridSquare::Split45;
+      }
+   }
+};
+
+// NOTE: pre-gen'd based on flags
+slm::vec2 TerrainBlock::MaterialMap::sMatCoords[8][4] = {
+   {
+      slm::vec2(0.0f, 1.0f),
+      slm::vec2(0.0f, 0.0f),
+      slm::vec2(1.0f, 0.0f),
+      slm::vec2(1.0f, 1.0f),
+   },
+   {
+      slm::vec2(1.0, 1.0),
+      slm::vec2(0.0, 1.0),
+      slm::vec2(0.0, 0.0),
+      slm::vec2(1.0, 0.0)
+   },
+   {
+      slm::vec2(1.0, 1.0),
+      slm::vec2(1.0, 0.0),
+      slm::vec2(0.0, 0.0),
+      slm::vec2(0.0, 1.0)
+   },
+   {
+      slm::vec2(0.0, 1.0), 
+      slm::vec2(1.0, 1.0),
+      slm::vec2(1.0, 0.0),
+      slm::vec2(0.0, 0.0)
+   },
+   {
+      slm::vec2(0.0, 0.0), 
+      slm::vec2(0.0, 1.0),
+      slm::vec2(1.0, 1.0),
+      slm::vec2(1.0, 0.0)
+   },
+   {
+      slm::vec2(1.0, 0.0), 
+      slm::vec2(0.0, 0.0),
+      slm::vec2(0.0, 1.0),
+      slm::vec2(1.0, 1.0)
+   },
+   {
+      slm::vec2(1.0, 0.0),
+      slm::vec2(1.0, 1.0),
+      slm::vec2(0.0, 1.0),
+      slm::vec2(0.0, 0.0)
+   },
+   {
+      slm::vec2(0.0, 0.0), 
+      slm::vec2(1.0, 0.0),
+      slm::vec2(1.0, 1.0),
+      slm::vec2(0.0, 1.0)
+   }
+};
+
+inline TerrainBlockList::~TerrainBlockList()
+{
+   for (BlockInfo& info : mBlocks)
+   {
+      delete info.instance;
+   }
+}
+
+inline void TerrainBlockList::loadBlocks(ResManager& mgr, const char* baseName, int volIdx)
+{
+   for (BlockInfo& info : mBlocks)
+   {
+      MemRStream rStream(0, NULL);
+      
+      if (info.instance)
+      {
+         delete info.instance;
+         info.instance = NULL;
+      }
+      
+      char buffer[256];
+      snprintf(buffer, 256, "%s#%i.dtb", baseName, info.ident);
+      
+      if (mgr.openFile(buffer, rStream, volIdx))
+      {
+         info.instance = new TerrainBlock(this);
+         if (!info.instance->read(rStream))
+         {
+            delete info.instance;
+            info.instance = NULL;
+         }
+      }
+   }
+}
+
+inline void TerrainBlockList::setSingleBlock(TerrainBlock* block)
+{
+   mBlocks.resize(1);
+   mBlockMap.resize(1);
+   mBlockMap[0] = 0;
+   mBlocks[0].instance = block;
+   mScale = 3; // i.e. 8 units per square
+   mSize[0] = 1;
+   mSize[1] = 1;
+}
 
 class Shape : public DarkstarPersistObject
 {
@@ -3047,6 +3680,344 @@ public:
    }
 };
 
+class TerrainViewer : public GenericViewer
+{
+public:
+   
+   TerrainBlockList* mBlockList;
+   TerrainBlock* mBlock;
+   TerrainBlockList mSingleList;
+   
+   std::string mLastMLName;
+   std::vector<uint32_t> mBlockModels;
+   
+   TerrainViewer(ResManager* res)
+   {
+      mResourceManager = res;
+      mPalette = NULL;
+      mLastMLName = "";
+   }
+   
+   ~TerrainViewer()
+   {
+      clear();
+   }
+   
+   
+   void renderBlock(TerrainBlock& block, float squareSize)
+   {
+      // Setup pipeline state and matrices
+      GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, 0, 1.1f);
+      GFXSetModelViewProjection(mModelMatrix, mViewMatrix, mProjectionMatrix);
+      
+      static std::vector<slm::vec3> verts;
+      static std::vector<slm::vec2> texverts;
+      static std::vector<uint16_t> inds;
+      
+      uint32_t usedModels = 0;
+      
+      // Clear buffers
+      verts.clear();
+      texverts.clear();
+      inds.clear();
+      
+      uint32_t vertCounter = 0;
+      uint32_t squareCounter = 0;
+      const uint32_t maxSquaresPerDraw = 64;
+      
+      struct DrawBatch
+      {
+         uint32_t squareIndexes[64];
+         uint16_t squareFlags[64];
+         uint16_t matFlags[64];
+         uint32_t matIndex;
+         uint32_t usedSquares;
+         uint32_t modelId;
+      };
+      
+      static std::vector<DrawBatch> drawBatches;
+      
+      // Create batches
+      for (int y = 0; y < block.mSize[1]; y+= 8)
+      {
+         int yLast = std::min<int>(y + 8, block.mSize[1]);
+         int yCount = yLast - y;
+         
+         for (int x = 0; x < block.mSize[0]; x+= 8)
+         {
+            int xLast = std::min<int>(x + 8, block.mSize[0]);
+            int xCount = xLast - x;
+            
+            TerrainBlock::GridSquare* sq = block.findSquare(x,y);
+            TerrainBlock::MaterialMap* mat = block.getMaterialMap(x,y);
+            
+            bool newBatch = true;
+            
+            for (DrawBatch& batch : drawBatches)
+            {
+               if (batch.matIndex == mat->matIndex && batch.usedSquares < maxSquaresPerDraw)
+               {
+                  batch.squareIndexes[batch.usedSquares] = (y * block.mSize[0]) + x;
+                  batch.squareFlags[batch.usedSquares] = sq->flags;
+                  batch.matFlags[batch.usedSquares] = mat->flag;
+                  batch.usedSquares++;
+                  newBatch = false;
+                  break;
+               }
+            }
+            
+            if (newBatch)
+            {
+               DrawBatch newBatch = {};
+               newBatch.matIndex = mat->matIndex;
+               newBatch.squareIndexes[0] = (y * block.mSize[0]) + x;
+               newBatch.squareFlags[0] = sq->flags;
+               newBatch.matFlags[0] = mat->flag;
+               newBatch.usedSquares = 1;
+               newBatch.modelId = drawBatches.size();
+               
+               if (std::find(mBlockModels.begin(), mBlockModels.end(), newBatch.modelId) == mBlockModels.end())
+               {
+                  mBlockModels.push_back(newBatch.modelId);
+               }
+               
+               drawBatches.push_back(newBatch);
+            }
+         }
+      }
+      
+      // Draw batches
+      for (DrawBatch& batch : drawBatches)
+      {
+         for (uint32_t i=0; i<batch.usedSquares; i++)
+         {
+            uint32_t x = batch.squareIndexes[i] % block.mSize[0];
+            uint32_t y = batch.squareIndexes[i] / block.mSize[0];
+            
+            // Calc square heights
+            float h1 = block.getHeight(x, y);
+            float h2 = block.getHeight((x + 1), y);
+            float h3 = block.getHeight(x, (y + 1));
+            float h4 = block.getHeight((x + 1), (y + 1));
+            
+            // Add vertices for square corners
+            slm::vec3 vp(x * squareSize, y * squareSize, 0.0f);
+            verts.push_back(vp + slm::vec3(0, 0, h1));
+            verts.push_back(vp + slm::vec3(squareSize, 0, h2));
+            verts.push_back(vp + slm::vec3(0, squareSize, h3));
+            verts.push_back(vp + slm::vec3(squareSize, squareSize, h4));
+            
+            // Texcoords (material)
+            slm::vec2 texCoords[4];
+            TerrainBlock::MaterialMap::getBaseTexCoords(batch.matFlags[i], &texCoords[0]);
+            for (uint32_t i=0; i<4; i++)
+            {
+               texverts.push_back(texCoords[i]);
+            }
+            
+            // Determine indices based on Split45 flag
+            // TODO: verify these indices are correct
+            if ((batch.squareFlags[i] & TerrainBlock::GridSquare::Split45) != 0)
+            {
+               inds.push_back(vertCounter + 0); 
+               inds.push_back(vertCounter + 2);
+               inds.push_back(vertCounter + 3);
+               //
+               inds.push_back(vertCounter + 0);
+               inds.push_back(vertCounter + 3);
+               inds.push_back(vertCounter + 1);
+            }
+            else
+            {
+               inds.push_back(vertCounter + 0); 
+               inds.push_back(vertCounter + 1);
+               inds.push_back(vertCounter + 2);
+               //
+               inds.push_back(vertCounter + 1);
+               inds.push_back(vertCounter + 3);
+               inds.push_back(vertCounter + 2);
+            }
+         
+            uint32_t modelId = batch.modelId;
+            
+            // Load model data into GPU
+            GFXLoadModelData(modelId,
+                             verts.data(),
+                             texverts.data(),
+                             inds.data(),
+                             verts.size(),
+                             texverts.size(),
+                             inds.size());
+            
+            GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, mActiveMaterials[batch.matIndex].tex.texID, 1.1f);
+            GFXSetModelVerts(modelId, 0, 0);
+            GFXDrawModelPrims(verts.size() / 3, inds.size(), 0, 0);
+            
+            // Clear the buffers for the next batch
+            verts.clear();
+            texverts.clear();
+            inds.clear();
+         }
+      }
+   }
+   
+   void render()
+   {
+      // Render all surfs for now
+      slm::mat4 baseModel = mModelMatrix;
+      slm::mat4 y_up = slm::rotation_x(slm::radians(-90.0f));
+      mModelMatrix = baseModel * y_up;
+      updateMVP();
+      
+      // TODO: use the grid
+      if (mBlock)
+      {
+         renderBlock(*mBlock,
+                     1<<mBlockList->mScale);
+         
+      }
+      
+      mModelMatrix = baseModel;
+   }
+   
+   void updateMaterials()
+   {
+      if (mBlockList == NULL)
+         return;
+      
+      if (mMaterialList == NULL || mLastMLName != mBlockList->mMLName)
+      {
+         mLastMLName = mBlockList->mMLName;
+         mMaterialList = mResourceManager->openTypedObject<MaterialList>(mBlockList->mMLName.c_str());
+         initMaterials();
+      }
+   }
+   
+   void clear()
+   {
+      for (uint32_t modelId : mBlockModels)
+      {
+         GFXClearModelData(modelId);
+      }
+      mBlockModels.clear();
+   
+      if (mBlockList != &mSingleList)
+      {
+         delete mBlockList;
+         mBlock = NULL;
+      }
+      else
+      {
+         delete mBlock;
+      }
+      
+      mBlock = NULL;
+      mBlockList = NULL;
+      mSingleList.setSingleBlock(NULL);
+      clearTextures();
+      mMaterialList = NULL;
+   }
+};
+
+
+
+class TerrainViewerController : public ViewController
+{
+public:
+   SDL_Window* mWindow;
+   float xRot, yRot, mDetailDist;
+   
+   std::string mPaletteName;
+   TerrainViewer mViewer;
+   
+   TerrainViewerController(SDL_Window* window, ResManager* mgr) : mWindow(window), mViewer(mgr)
+   {
+      xRot = 0.0f;
+      yRot = 0.0f;
+      mCamRot = slm::vec3(0,0,0);
+      mDetailDist = 0.0f;
+      mPaletteName = "ice.day.ppl";
+   }
+   
+   ~TerrainViewerController()
+   {
+      mViewer.clear();
+   }
+   
+   void loadGrid(const char* filename, int volIdx=-1)
+   {
+      MemRStream rStream(0, NULL);
+      mViewer.clear();
+      
+      if (mViewer.mResourceManager->openFile(filename, rStream, volIdx))
+      {
+         mViewer.mBlockList = new TerrainBlockList();
+         if (mViewer.mBlockList->read(rStream))
+         {
+            std::string baseName = filename;
+            std::size_t dot_pos = baseName.find_last_of('.');
+
+            if (dot_pos != std::string::npos)
+            {
+               baseName = baseName.substr(0, dot_pos);
+            }
+            
+            mViewer.mBlockList->loadBlocks(*mViewer.mResourceManager, baseName.c_str(), volIdx);
+         }
+         else
+         {
+            delete mViewer.mBlockList;
+            mViewer.mBlockList = NULL;
+         }
+      }
+      
+      mViewer.updateMaterials();
+   }
+   
+   void loadSingleBlock(const char* filename, int volIdx=-1)
+   {
+      MemRStream rStream(0, NULL);
+      mViewer.clear();
+      
+      if (mViewer.mResourceManager->openFile(filename, rStream, volIdx))
+      {
+         mViewer.mBlock = new TerrainBlock();
+         if (mViewer.mBlock->read(rStream))
+         {
+            mViewer.mBlockList = &mViewer.mSingleList;
+            mViewer.mBlockList->setSingleBlock(mViewer.mBlock);
+         }
+         else
+         {
+            delete mViewer.mBlock;
+            mViewer.mBlock = NULL;
+         }
+      }
+      
+      mViewer.updateMaterials();
+   }
+   
+   
+   bool isResourceLoaded()
+   {
+      return !(mViewer.mBlockList == NULL && mViewer.mBlock == NULL);
+   }
+   
+   void update(float dt)
+   {
+      mViewer.mModelMatrix = slm::rotation_x(xRot) * slm::rotation_y(yRot);
+      slm::mat4 rotMat = slm::rotation_z(slm::radians(mCamRot.z)) * slm::rotation_y(slm::radians(mCamRot.y)) *  slm::rotation_x(slm::radians(mCamRot.x));
+      rotMat = inverse(rotMat);
+      mViewer.mViewMatrix = slm::mat4(1) * rotMat * slm::translation(-mViewPos);
+      
+      int w, h;
+      SDL_GetWindowSize(mWindow, &w, &h);
+      mViewer.mProjectionMatrix = slm::perspective_fov_rh( slm::radians(90.0), (float)w/(float)h, 0.01f, 10000.0f);
+      
+      mViewer.render();
+   }
+};
+
 class ShapeViewerController : public ViewController
 {
 public:
@@ -3286,6 +4257,7 @@ struct MainState
    ResManager resManager;
    ShapeViewerController* shapeController;
    InteriorViewerController* interiorController;
+   TerrainViewerController* terrainController;
    ViewController *currentController;
    
    //
@@ -3314,7 +4286,7 @@ struct MainState
    
    SDL_Window* window;
    
-   MainState() : shapeController(NULL), interiorController(NULL), currentController(NULL), in_argc(0), isGFXSetup(false)
+   MainState() : shapeController(NULL), interiorController(NULL), terrainController(NULL), currentController(NULL), in_argc(0), isGFXSetup(false)
    {
       lastTicks = 0;
       selectedFileIdx = -1;
@@ -3335,6 +4307,7 @@ struct MainState
       
       shapeController = new ShapeViewerController(window, &resManager);
       interiorController = new InteriorViewerController(window, &resManager);
+      terrainController = new TerrainViewerController(window, &resManager);
    }
    
    int boot();
@@ -3406,8 +4379,10 @@ void MainState::shutdown()
    {
       delete shapeController;
       delete interiorController;
+      delete terrainController;
       shapeController = NULL;
       interiorController = NULL;
+      terrainController = NULL;
    }
    
    GFXTeardown();
@@ -3442,11 +4417,22 @@ int MainState::boot()
       {
          shapeController->mPaletteName = path;
          interiorController->mPaletteName = path;
+         terrainController->mPaletteName = path;
       }
       else if (ext == ".dis")
       {
          interiorController->loadInterior(path);
          currentController = interiorController;
+      }
+      else if (ext == ".dtf")
+      {
+         terrainController->loadGrid(path);
+         currentController = terrainController;
+      }
+      else if (ext == ".dtb")
+      {
+         terrainController->loadSingleBlock(path);
+         currentController = terrainController;
       }
       else if (ext == "")
       {
@@ -3456,7 +4442,7 @@ int MainState::boot()
    
    if (!currentController->isResourceLoaded())
    {
-      fprintf(stderr, "please specify a starting shape or interior to load\n");
+      fprintf(stderr, "please specify a starting shape or interior or terrain to load\n");
       return 1;
    }
    
@@ -3472,6 +4458,8 @@ int MainState::boot()
    fileList.clear();
    restrictExtList.push_back(".dts");
    restrictExtList.push_back(".dis");
+   restrictExtList.push_back(".dtb");
+   restrictExtList.push_back(".dtf");
    resManager.enumerateFiles(fileList, selectedVolumeIdx, &restrictExtList);
    sFileList.resize(fileList.size());
    
@@ -3547,6 +4535,16 @@ int MainState::loop()
       {
          interiorController->loadInterior(cFileList[selectedFileIdx], selectedVolumeIdx);
          currentController = interiorController;
+      }
+      else if (ext == ".dtf")
+      {
+         terrainController->loadGrid(cFileList[selectedFileIdx], selectedVolumeIdx);
+         currentController = terrainController;
+      }
+      else if (ext == ".dtb")
+      {
+         terrainController->loadSingleBlock(cFileList[selectedFileIdx], selectedVolumeIdx);
+         currentController = terrainController;
       }
       else
       {

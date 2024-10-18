@@ -443,4 +443,229 @@ bool Bitmap::read(MemRStream& mem)
   return true;
 }
 
+// NOTE: stripped down version of LZHUFF algorithm for read-only decoding
+
+void LZH::lzh_unpack(int text_size, MemRStream& in_stream, MemRStream& out_stream)
+{
+   init_huff_and_tree();
+   int r = BUF_SIZE - LOOK_AHEAD;
+   text_buf.assign(BUF_SIZE + LOOK_AHEAD - 1, 0);
+   int count = 0;
+   
+   while (count < text_size) {
+      int c = decode_char(in_stream);
+      if (c < 256) {
+         uint8_t cv = static_cast<uint8_t>(c);
+         out_stream.write(cv);
+         text_buf[r] = c;
+         r = (r + 1) & (BUF_SIZE - 1);
+         count++;
+      } else {
+         int i = (r - decode_position(in_stream) - 1) & (BUF_SIZE - 1);
+         int j = c - 255 + THRESHOLD;
+         for (int k = 0; k < j; ++k) {
+            c = text_buf[(i + k) & (BUF_SIZE - 1)];
+            uint8_t cv = static_cast<uint8_t>(c);
+            out_stream.write(cv);
+            text_buf[r] = c;
+            r = (r + 1) & (BUF_SIZE - 1);
+            count++;
+         }
+      }
+   }
+}
+
+void LZH::init_huff_and_tree()
+{
+   getbuf = 0;
+   getlen = 0;
+   putlen = 0;
+   putbuf = 0;
+   codesize = 0;
+   match_length = 0;
+   textsize = 0;
+   start_huff();
+}
+
+void LZH::start_huff()
+{
+   freq.assign(TABLE_SIZE + 1, 0);
+   prnt.assign(TABLE_SIZE + N_CHAR, 0);
+   son.assign(TABLE_SIZE, 0);
+   
+   for (int i = 0; i < N_CHAR; i++) {
+      freq[i] = 1;
+      son[i] = (i + TABLE_SIZE) & 0xFFFF;
+      prnt[i + TABLE_SIZE] = i;
+   }
+   
+   int i = 0;
+   int j = N_CHAR;
+   while (j <= ROOT) {
+      freq[j] = freq[i] + freq[i + 1];
+      son[j] = i & 0xFFFF;
+      prnt[i] = prnt[i + 1] = j;
+      i += 2;
+      j += 1;
+   }
+   
+   freq[TABLE_SIZE] = 0xffff;
+   prnt[ROOT] = 0;
+}
+
+int LZH::decode_char(MemRStream& ios)
+{
+   int c = son[ROOT];
+   while (c < TABLE_SIZE) {
+      c += get_bit(ios);
+      c = son[c];
+   }
+   c -= TABLE_SIZE;
+   update(c);
+   return c;
+}
+
+int LZH::get_bit(MemRStream& ios)
+{
+   refill_byte_buf(ios);
+   int bit = getbuf;
+   getbuf <<= 1;
+   getbuf &= 0xFFFF;
+   getlen -= 1;
+   return (bit >> 15) & 0x1;
+}
+
+int LZH::get_byte(MemRStream& ios)
+{
+   refill_byte_buf(ios);
+   int byte = getbuf;
+   getbuf <<= 8;
+   getbuf &= 0xFFFF;
+   getlen -= 8;
+   return byte >> 8;
+}
+
+int LZH::decode_position(MemRStream& ios)
+{
+   int i = get_byte(ios);
+   int j = decode_dlen(i);
+   int c = D_CODE[i] << 6;
+   
+   j -= 2;
+   for (int k = 0; k < j; ++k) {
+      i = (i << 1) + get_bit(ios);
+   }
+   return c | (i & 0x3f);
+}
+
+void LZH::refill_byte_buf(MemRStream& ios)
+{
+   while (getlen <= 8) {
+      uint8_t byte;
+      if (!ios.read(byte)) {
+         byte = 0;
+      }
+      getbuf |= static_cast<uint8_t>(byte) << (8 - getlen);
+      getbuf &= 0xFFFF;
+      getlen += 8;
+   }
+}
+
+void LZH::update(int c)
+{
+   if (freq[ROOT] == MAX_FREQ) {
+      reconst();
+   }
+   
+   c = prnt[c + TABLE_SIZE];
+   do {
+      freq[c]++;
+      int k = freq[c];
+      int l = c + 1;
+      if (k > freq[l]) {
+         while (k > freq[l]) l++;
+         l--;
+         std::swap(freq[c], freq[l]);
+         int i = son[c];
+         prnt[i] = l;
+         if (i < TABLE_SIZE) prnt[i + 1] = l;
+         int j = son[l];
+         son[l] = i & 0xFFFF;
+         prnt[j] = c;
+         if (j < TABLE_SIZE) prnt[j + 1] = c;
+         son[c] = j & 0xFFFF;
+         c = l;
+      }
+      c = prnt[c];
+   } while (c != 0);
+}
+
+void LZH::reconst()
+{
+   int j = 0;
+   for (int i = 0; i < TABLE_SIZE; i++) {
+      if (son[i] >= TABLE_SIZE) {
+         freq[j] = (freq[i] + 1) >> 1;
+         son[j] = son[i];
+         j++;
+      }
+   }
+   int i = 0;
+   for (int j = N_CHAR; j < TABLE_SIZE; j++) {
+      int k = i + 1;
+      int f = freq[j] = freq[i] + freq[k];
+      k = j - 1;
+      while (f < freq[k] && k >= 0) k--;
+      k++;
+      int l = (j - k) * 2;
+      std::copy_backward(freq.begin() + k, freq.begin() + j, freq.begin() + k + l + 1);
+      freq[k] = f;
+      std::copy_backward(son.begin() + k, son.begin() + j, son.begin() + k + l + 1);
+      son[k] = i;
+      i += 2;
+   }
+   for (int i = 0; i < TABLE_SIZE; i++) {
+      int k = son[i];
+      if (k >= TABLE_SIZE) prnt[k] = i;
+      else {
+         prnt[k] = i;
+         prnt[k + 1] = i;
+      }
+   }
+}
+
+const uint8_t LZH::D_CODE[256] = {
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+   0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+   0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,
+   0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,
+   0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+   0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+   0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+   0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
+   0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06,
+   0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+   0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+   0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09,
+   0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+   0x0B, 0x0B, 0x0B, 0x0B, 0x0B, 0x0B, 0x0B, 0x0B,
+   0x0C, 0x0C, 0x0C, 0x0C, 0x0D, 0x0D, 0x0D, 0x0D,
+   0x0E, 0x0E, 0x0E, 0x0E, 0x0F, 0x0F, 0x0F, 0x0F,
+   0x10, 0x10, 0x10, 0x10, 0x11, 0x11, 0x11, 0x11,
+   0x12, 0x12, 0x12, 0x12, 0x13, 0x13, 0x13, 0x13,
+   0x14, 0x14, 0x14, 0x14, 0x15, 0x15, 0x15, 0x15,
+   0x16, 0x16, 0x16, 0x16, 0x17, 0x17, 0x17, 0x17,
+   0x18, 0x18, 0x19, 0x19, 0x1A, 0x1A, 0x1B, 0x1B,
+   0x1C, 0x1C, 0x1D, 0x1D, 0x1E, 0x1E, 0x1F, 0x1F,
+   0x20, 0x20, 0x21, 0x21, 0x22, 0x22, 0x23, 0x23,
+   0x24, 0x24, 0x25, 0x25, 0x26, 0x26, 0x27, 0x27,
+   0x28, 0x28, 0x29, 0x29, 0x2A, 0x2A, 0x2B, 0x2B,
+   0x2C, 0x2C, 0x2D, 0x2D, 0x2E, 0x2E, 0x2F, 0x2F,
+   0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+   0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F
+};
 

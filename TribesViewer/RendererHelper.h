@@ -21,6 +21,7 @@ extern void GFXHandleResize();
 extern int32_t GFXLoadTexture(Bitmap* bmp, Palette*pal);
 extern void GFXDeleteTexture(int32_t texID);
 extern void GFXLoadModelData(uint32_t modelId, void* verts, void* texverts, void* inds, uint32_t numVerts, uint32_t numTexVerts, uint32_t numInds);
+extern void GFXClearModelData(uint32_t modelId);
 extern void GFXSetModelViewProjection(slm::mat4 &model, slm::mat4 &view, slm::mat4 &proj);
 extern void GFXSetLightPos(slm::vec3 pos, slm::vec4 ambient);
 extern void GFXBeginModelPipelineState(ModelPipelineState state, int32_t texID, float testVal);
