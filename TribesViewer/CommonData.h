@@ -523,6 +523,20 @@ inline void copyMipDirect(uint32_t height, uint32_t src_stride, uint32_t dest_st
    }
 }
 
+inline void copyMipDirectPadded2(uint32_t height, uint32_t src_stride, uint32_t dest_stride, uint8_t* data, uint8_t* out_data)
+{
+   for (int y=0; y<height; y++)
+   {
+      uint8_t *srcPixels = data + (y*src_stride);
+      uint8_t *destPixels = out_data + (y*dest_stride);
+      for (int x=0; x<src_stride; x+=2)
+      {
+         *destPixels++ = *srcPixels++;
+         *destPixels++ = *srcPixels++;
+      }
+   }
+}
+
 inline void copyMipDirectPadded(uint32_t height, uint32_t src_stride, uint32_t dest_stride, uint8_t* data, uint8_t* out_data)
 {
    for (int y=0; y<height; y++)

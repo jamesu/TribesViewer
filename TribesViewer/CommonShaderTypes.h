@@ -47,6 +47,12 @@ enum ModelPipelineState
    ModelPipeline_Count
 };
 
+enum TerrainPipelineState
+{
+   TerrainPipeline_Squares,
+   TerrainPipeline_Lightmap_Squares,
+};
+
 typedef struct
 {
    vector_float2 position;

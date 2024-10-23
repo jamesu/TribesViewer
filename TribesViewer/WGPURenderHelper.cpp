@@ -40,6 +40,9 @@
 
 #include "lineShader.wgsl.h"
 #include "modelShader.wgsl.h"
+#include "terrainShader.wgsl.h"
+
+#include "RendererHelper.h"
 
 
 extern "C"
@@ -65,14 +68,22 @@ struct CommonUniformStruct
    slm::vec4 params2;
    slm::vec4 lightPos;
    slm::vec4 lightColor;
+   
+   slm::vec4 squareTexCoords[8*2];
 };
 
-struct ProgramInfo
+struct BaseProgramInfo
 {
-   WGPURenderPipeline pipelines[ModelPipeline_Count];
    CommonUniformStruct uniforms;
    
-   ProgramInfo() { memset(this, '\0', sizeof(ProgramInfo)); }
+   BaseProgramInfo() { memset(&uniforms, '\0', sizeof(CommonUniformStruct)); }
+};
+
+struct ModelProgramInfo : public BaseProgramInfo
+{
+   WGPURenderPipeline pipelines[ModelPipeline_Count];
+   
+   ModelProgramInfo() { memset(pipelines, '\0', sizeof(pipelines)); }
    
    void reset()
    {
@@ -85,18 +96,34 @@ struct ProgramInfo
    }
 };
 
-struct LineProgramInfo
+struct LineProgramInfo : public BaseProgramInfo
 {
    WGPURenderPipeline pipeline;
-   CommonUniformStruct uniforms;
    
-   LineProgramInfo() { memset(this, '\0', sizeof(LineProgramInfo)); }
+   LineProgramInfo() { pipeline = NULL; }
    
    void reset()
    {
       if (pipeline)
          wgpuRenderPipelineRelease(pipeline);
       pipeline = NULL;
+   }
+};
+
+struct TerrainProgramInfo : public BaseProgramInfo
+{
+   WGPURenderPipeline pipelines[2];
+   
+   TerrainProgramInfo() { memset(this, '\0', sizeof(TerrainProgramInfo)); }
+   
+   void reset()
+   {
+      if (pipelines[0])
+         wgpuRenderPipelineRelease(pipelines[0]);
+      if (pipelines[1])
+         wgpuRenderPipelineRelease(pipelines[1]);
+      pipelines[0] = NULL;
+      pipelines[1] = NULL;
    }
 };
 
@@ -163,13 +190,17 @@ struct SDLState
    std::vector<BufferAlloc> buffers;
    
    WGPUSampler modelCommonSampler;
+   WGPUSampler modelCommonLinearSampler;
    WGPUBindGroupLayout commonUniformLayout;
    WGPUBindGroupLayout commonTextureLayout;
+   WGPUBindGroupLayout terrainTextureLayout;
+   WGPUBindGroupLayout terrainSamplersLayout;
    WGPUBindGroup commonUniformGroup;
    BufferRef commonUniformBuffer;
    
    LineProgramInfo lineProgram;
-   ProgramInfo modelProgram;
+   ModelProgramInfo modelProgram;
+   TerrainProgramInfo terrainProgram;
    
    //
    
@@ -203,7 +234,21 @@ struct SDLState
    // Frame state
    WGPURenderPassEncoder renderEncoder;
    WGPUCommandEncoder commandEncoder;
+   BaseProgramInfo* currentProgram;
    WGPURenderPipeline currentPipeline;
+   
+   // Samplers
+   
+   struct TerrainGPUResource
+   {
+      uint32_t mMatListTexID;
+      uint32_t mHeightMapTexID;
+      uint32_t mGridMapTexID;
+      uint32_t mLightMapTexID;
+      WGPUBindGroup mBindGroup;
+   };
+   
+   std::vector<TerrainGPUResource> terrainResources;
    
    int32_t backingSize[2];
    float backingScale;
@@ -230,6 +275,7 @@ struct SDLState
    void endRenderPass();
    
    WGPUBindGroup makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sampler);
+   WGPUBindGroup makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear);
    WGPURenderPassDescriptor createRenderPass(bool secondary);
 };
 
@@ -364,9 +410,96 @@ static LineProgramInfo buildLineProgram()
    return ret;
 }
 
-ProgramInfo buildProgram()
+
+static TerrainProgramInfo buildTerrainProgram()
 {
-   ProgramInfo ret;
+   TerrainProgramInfo ret;
+   
+   // Create the pipeline layout
+   WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
+   pipelineLayoutDesc.label = "Pipeline Layout";
+   pipelineLayoutDesc.bindGroupLayoutCount = 2;
+   WGPUBindGroupLayout bindGroupLayouts[2] = {smState.commonUniformLayout, smState.terrainTextureLayout};
+   pipelineLayoutDesc.bindGroupLayouts = bindGroupLayouts;
+   
+   WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(smState.gpuDevice, &pipelineLayoutDesc);
+   
+   // Define the vertex buffer layout
+   WGPUVertexBufferLayout vertexBufferLayout = {};
+   vertexBufferLayout.arrayStride = 0;
+   vertexBufferLayout.stepMode = WGPUVertexStepMode_VertexBufferNotUsed;
+   vertexBufferLayout.attributeCount = 0;
+   vertexBufferLayout.attributes = NULL;
+   
+   // Vertex state configuration
+   WGPUVertexState vertexState = {};
+   vertexState.module = smState.shaders["terrainShader"];  // Loaded shader module
+   vertexState.entryPoint = "vertMain";          // Entry point of the vertex shader
+   vertexState.bufferCount = 0;
+   vertexState.buffers = NULL;
+   
+   // Fragment state
+   WGPUFragmentState fragmentState = {};
+   fragmentState.module = smState.shaders["terrainShader"]; // Loaded fragment shader module
+   fragmentState.entryPoint = "fragMain";           // Entry point of the fragment shader
+   fragmentState.targetCount = 1;
+   
+   WGPUColorTargetState colorTargetState = {};
+   colorTargetState.format = WGPUTextureFormat_BGRA8Unorm; // Output texture format
+   colorTargetState.blend = NULL;                          // No blending
+   colorTargetState.writeMask = WGPUColorWriteMask_All;    // Write all color channels
+   
+   fragmentState.targets = &colorTargetState;
+   
+   // Define the primitive state (we assume you are drawing lines, so topology is LineList)
+   WGPUPrimitiveState primitiveState = {};
+   primitiveState.topology = WGPUPrimitiveTopology_TriangleList;
+   primitiveState.stripIndexFormat = WGPUIndexFormat_Undefined;  // Non-indexed drawing
+   primitiveState.frontFace = WGPUFrontFace_CW;                  // Not relevant since there's no culling
+   primitiveState.cullMode = WGPUCullMode_None;                  // No culling for lines
+   
+   // Multisample state
+   WGPUMultisampleState multisampleState = {};
+   multisampleState.count = 1;
+   multisampleState.mask = ~0;
+   multisampleState.alphaToCoverageEnabled = false;
+   
+   // Depth stencil state
+   // (NOTE: we need this even if we aren't using it)
+   WGPUDepthStencilState depthStencilState = {};
+   depthStencilState.format = WGPUTextureFormat_Depth32Float;      // Depth format
+   depthStencilState.depthWriteEnabled = true;                    // Enable depth writing
+   depthStencilState.depthCompare = WGPUCompareFunction_Less;     // Use less-than
+   depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
+   depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
+   depthStencilState.stencilBack = depthStencilState.stencilFront; // Same as front
+   depthStencilState.stencilReadMask = 0xFFFFFFFF;
+   depthStencilState.stencilWriteMask = 0xFFFFFFFF;
+   depthStencilState.depthBias = 0;                               // No depth bias
+   depthStencilState.depthBiasSlopeScale = 0.0f;
+   depthStencilState.depthBiasClamp = 0.0f;
+   
+   // Create the render pipeline descriptor
+   WGPURenderPipelineDescriptor pipelineDesc = {};
+   pipelineDesc.label = "Render Pipeline";
+   pipelineDesc.layout = pipelineLayout;
+   pipelineDesc.vertex = vertexState;
+   pipelineDesc.primitive = primitiveState;
+   pipelineDesc.fragment = &fragmentState;
+   pipelineDesc.depthStencil = &depthStencilState;
+   pipelineDesc.multisample = multisampleState;
+   
+   // Finally, create the pipeline
+   ret.pipelines[0] = wgpuDeviceCreateRenderPipeline(smState.gpuDevice, &pipelineDesc);
+   
+   return ret;
+}
+
+ModelProgramInfo buildModelProgram()
+{
+   ModelProgramInfo ret;
    
    // Create the pipeline layout
    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
@@ -600,6 +733,7 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    
    smState.loadShaderModule("lineShader", sLineShaderCode);
    smState.loadShaderModule("modelShader", sModelShaderCode);
+   smState.loadShaderModule("terrainShader", sTerrainShaderCode);
    
    // Init gui
    IMGUI_CHECKVERSION();
@@ -628,6 +762,14 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    samplerDesc.maxAnisotropy = 1;
    
    smState.modelCommonSampler = wgpuDeviceCreateSampler(smState.gpuDevice, &samplerDesc);
+   
+   samplerDesc.minFilter = WGPUFilterMode_Linear;
+   samplerDesc.magFilter = WGPUFilterMode_Linear;
+   samplerDesc.addressModeU = WGPUAddressMode_Repeat;
+   samplerDesc.addressModeV = WGPUAddressMode_Repeat;
+   samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+   samplerDesc.maxAnisotropy = 1;
+   smState.modelCommonLinearSampler = wgpuDeviceCreateSampler(smState.gpuDevice, &samplerDesc);
    
    // Make common uniform buffer layout
    
@@ -674,6 +816,52 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    
    smState.commonTextureLayout = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDesc1);
    
+   // Terrain group layout
+   
+   WGPUBindGroupLayoutEntry bindGroupLayoutEntriesTER[5];
+   // Terrain materials
+   bindGroupLayoutEntriesTER[0] = {};
+   bindGroupLayoutEntriesTER[0].binding = 0;
+   bindGroupLayoutEntriesTER[0].visibility = WGPUShaderStage_Fragment;
+   bindGroupLayoutEntriesTER[0].texture.sampleType = WGPUTextureSampleType_Float;
+   bindGroupLayoutEntriesTER[0].texture.viewDimension = WGPUTextureViewDimension_2DArray;
+   bindGroupLayoutEntriesTER[0].texture.multisampled = false;
+   
+   // Terrain grid
+   bindGroupLayoutEntriesTER[1] = {};
+   bindGroupLayoutEntriesTER[1].binding = 1;
+   bindGroupLayoutEntriesTER[1].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+   bindGroupLayoutEntriesTER[1].texture.sampleType = WGPUTextureSampleType_Uint;
+   bindGroupLayoutEntriesTER[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+   bindGroupLayoutEntriesTER[1].texture.multisampled = false;
+   
+   // Terrain heightmap
+   bindGroupLayoutEntriesTER[2] = {};
+   bindGroupLayoutEntriesTER[2].binding = 2;
+   bindGroupLayoutEntriesTER[2].visibility = WGPUShaderStage_Vertex;
+   bindGroupLayoutEntriesTER[2].texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+   bindGroupLayoutEntriesTER[2].texture.viewDimension = WGPUTextureViewDimension_2D;
+   bindGroupLayoutEntriesTER[2].texture.multisampled = false;
+   
+   // Sampler pixel
+   bindGroupLayoutEntriesTER[3] = {};
+   bindGroupLayoutEntriesTER[3].binding = 3;
+   bindGroupLayoutEntriesTER[3].visibility = WGPUShaderStage_Vertex;
+   bindGroupLayoutEntriesTER[3].sampler.type = WGPUSamplerBindingType_NonFiltering;
+   
+   // Sampler linear
+   bindGroupLayoutEntriesTER[4] = {};
+   bindGroupLayoutEntriesTER[4].binding = 4;
+   bindGroupLayoutEntriesTER[4].visibility = WGPUShaderStage_Fragment;
+   bindGroupLayoutEntriesTER[4].sampler.type = WGPUSamplerBindingType_Filtering;
+   
+   WGPUBindGroupLayoutDescriptor bindGroupLayoutDescTER = {};
+   bindGroupLayoutDescTER.label = "Terrain Bind Group Layout";
+   bindGroupLayoutDescTER.entryCount = 5;
+   bindGroupLayoutDescTER.entries = bindGroupLayoutEntriesTER;
+   
+   smState.terrainTextureLayout = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDescTER);
+   
    WGPUBindGroupEntry commonEntry = {};
    commonEntry.binding = 0;
    commonEntry.buffer = smState.commonUniformBuffer.buffer;
@@ -687,8 +875,9 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    commonDesc.entries = &commonEntry;
    smState.commonUniformGroup = wgpuDeviceCreateBindGroup(smState.gpuDevice, &commonDesc);
    
-   smState.modelProgram = buildProgram();
+   smState.modelProgram = buildModelProgram();
    smState.lineProgram = buildLineProgram();
+   smState.terrainProgram = buildTerrainProgram();
    
    return 0;
 }
@@ -696,8 +885,10 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
 SDLState::SDLState()
 {
    modelCommonSampler = NULL;
+   modelCommonLinearSampler = NULL;
    commonUniformLayout = NULL;
    commonTextureLayout = NULL;
+   terrainTextureLayout = NULL;
    commonUniformGroup = NULL;
    
    projectionMatrix = slm::mat4(1);
@@ -982,6 +1173,7 @@ void SDLState::resetWGPUState()
       wgpuBindGroupRelease(commonUniformGroup);
       wgpuBindGroupLayoutRelease(commonUniformLayout);
       wgpuBindGroupLayoutRelease(commonTextureLayout);
+      wgpuBindGroupLayoutRelease(terrainTextureLayout);
    }
    
    for (auto& itr : shaders)
@@ -1011,6 +1203,7 @@ void SDLState::resetWGPUState()
    modelCommonSampler = NULL;
    commonUniformLayout = NULL;
    commonTextureLayout = NULL;
+   terrainTextureLayout = NULL;
    commonUniformGroup = NULL;
 }
 
@@ -1032,6 +1225,42 @@ WGPUBindGroup SDLState::makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sam
    bindGroupDesc.label = "SimpleBindGoup";
    bindGroupDesc.layout = smState.commonTextureLayout;
    bindGroupDesc.entryCount = 2;
+   bindGroupDesc.entries = bindGroupEntries;
+   
+   // Create the bind group
+   return wgpuDeviceCreateBindGroup(gpuDevice, &bindGroupDesc);
+}
+
+WGPUBindGroup SDLState::makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear)
+{
+   WGPUBindGroupEntry bindGroupEntries[5];
+   
+   // Texture entry
+   bindGroupEntries[0] = {};
+   bindGroupEntries[0].binding = 0;
+   bindGroupEntries[0].textureView = squareMatTex;
+   // Texture entry
+   bindGroupEntries[1] = {};
+   bindGroupEntries[1].binding = 1;
+   bindGroupEntries[1].textureView = mapTex;
+   // Texture entry
+   bindGroupEntries[2] = {};
+   bindGroupEntries[2].binding = 2;
+   bindGroupEntries[2].textureView = heightmapTex;
+   
+   // Sampler entry
+   bindGroupEntries[3] = {};
+   bindGroupEntries[3].binding = 3;
+   bindGroupEntries[3].sampler = samplerPixel;
+   // Sampler entry
+   bindGroupEntries[4] = {};
+   bindGroupEntries[4].binding = 4;
+   bindGroupEntries[4].sampler = samplerLinear;
+   
+   WGPUBindGroupDescriptor bindGroupDesc = {};
+   bindGroupDesc.label = "TerrainLayout";
+   bindGroupDesc.layout = smState.terrainTextureLayout;
+   bindGroupDesc.entryCount = 5;
    bindGroupDesc.entries = bindGroupEntries;
    
    // Create the bind group
@@ -1088,7 +1317,7 @@ bool SDLState::loadShaderModule(const char* name, const char* code)
    }
 }
 
-static const size_t BufferSize = 1024*1024*3;
+static const size_t BufferSize = 1024*1024*10;
 
 SDLState::BufferRef SDLState::allocBuffer(size_t size, uint32_t flags, uint16_t alignment)
 {
@@ -1286,6 +1515,117 @@ void GFXHandleResize()
    }
 }
 
+int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t height, void* data)
+{
+   uint8_t* texData = NULL;
+   uint32_t pow2W = getNextPow2(width);
+   uint32_t pow2H = getNextPow2(height);
+   WGPUTextureFormat pixFormat = WGPUTextureFormat_Undefined;
+   
+   uint32_t bpp = 4;
+   
+   switch (fmt)
+   {
+      case CustomTexture_Float:
+         bpp = 4;
+         pixFormat = WGPUTextureFormat_R32Float;
+         break;
+      case CustomTexture_RG8:
+         bpp = 2;
+         pixFormat = WGPUTextureFormat_RG8Uint;
+         break;
+      case CustomTexture_UNorm16:
+      case CustomTexture_TerrainSquare:
+         bpp = 2;
+         pixFormat = WGPUTextureFormat_R16Uint;
+         break;
+      default:
+         assert(false);
+         return -1;
+   }
+   
+   uint32_t paddedWidth = (uint32_t)AlignSize(pow2W*bpp, 256);
+   uint32_t alignedMipSize = paddedWidth * pow2H;
+   
+   texData = new uint8_t[alignedMipSize];
+   memset(texData, 0, alignedMipSize);
+   
+   copyMipDirect(height, width*bpp, paddedWidth, (uint8_t*)data, texData);
+   
+   WGPUTexture tex;
+   if (texData)
+   {
+      // Create the texture
+      WGPUTextureDescriptor textureDesc = {};
+      //textureDesc.label = "Texture";
+      textureDesc.size = (WGPUExtent3D){pow2W, pow2H, 1};
+      textureDesc.mipLevelCount = 1;      // Corresponds to GL_TEXTURE_BASE_LEVEL = 0 and GL_TEXTURE_MAX_LEVEL = 0
+      textureDesc.sampleCount = 1;
+      textureDesc.dimension = WGPUTextureDimension_2D;
+      textureDesc.format = pixFormat;  // Corresponds to GL_RGBA in OpenGL
+      textureDesc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+      tex = wgpuDeviceCreateTexture(smState.gpuDevice, &textureDesc);
+      
+      // Create the texture view
+      WGPUTextureViewDescriptor textureViewDesc = {};
+      //textureViewDesc.label = "Texture View";
+      textureViewDesc.format = pixFormat;
+      textureViewDesc.dimension = WGPUTextureViewDimension_2D;
+      textureViewDesc.mipLevelCount = 1;
+      textureViewDesc.arrayLayerCount = 1;
+      WGPUTextureView texView = wgpuTextureCreateView(tex, &textureViewDesc);
+      
+      // Upload texture data
+      WGPUTextureDataLayout layout = {};
+      layout.offset = 0;
+      layout.bytesPerRow = paddedWidth;
+      layout.rowsPerImage = pow2H;
+      WGPUExtent3D size = {pow2W, pow2H, 1};
+      
+      WGPUImageCopyTexture copyInfo = {};
+      copyInfo.texture = tex;
+      copyInfo.mipLevel = 0;
+      copyInfo.origin = (WGPUOrigin3D){0, 0, 0};
+      copyInfo.aspect = WGPUTextureAspect_All;
+      
+      wgpuQueueWriteTexture(smState.gpuQueue,
+                            &copyInfo,
+                            texData,
+                            alignedMipSize, // Assuming padded 4 bytes per pixel (RGBA8 format)
+                            &layout,
+                            &size);
+      
+      // Clean up texture data after uploading
+      delete[] texData;
+      
+      SDLState::TexInfo newInfo = {};
+      newInfo.texture = tex;
+      newInfo.textureView = texView;
+      newInfo.texBindGroup = NULL;
+      
+      // Find or add texture to smState.textures
+      int sz = smState.textures.size();
+      for (int i = 0; i < sz; i++)
+      {
+         if (smState.textures[i].texture == NULL)
+         {
+            smState.textures[i] = newInfo;
+            return i;
+         }
+      }
+      
+      smState.textures.push_back(newInfo);
+      return (uint32_t)(smState.textures.size() - 1);
+   }
+   else
+   {
+      // Handle the case where texture creation failed
+      delete[] texData;
+      return -1;
+   }
+   
+   return -1;
+}
 
 int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
 {
@@ -1414,6 +1754,141 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
    return -1;
 }
 
+int32_t GFXLoadTextureSet(uint32_t numBitmaps, Bitmap** bmps, Palette* defaultPal)
+{
+    if (numBitmaps == 0 || bmps == nullptr)
+        return -1;
+
+    Bitmap* firstBmp = bmps[0];
+    uint32_t pow2W = getNextPow2(firstBmp->mWidth);
+    uint32_t pow2H = getNextPow2(firstBmp->mHeight);
+    uint32_t paddedWidth = (uint32_t)AlignSize(pow2W * 4, 256);
+    uint32_t alignedMipSize = paddedWidth * pow2H;
+    
+    // Allocate memory to store texture data for each bitmap layer
+    uint8_t** texDataArray = new uint8_t*[numBitmaps];
+
+    for (uint32_t i = 0; i < numBitmaps; ++i)
+    {
+        Bitmap* bmp = bmps[i];
+        Palette::Data* pal = nullptr;
+        
+        if (bmp->mBitDepth == 8)
+        {
+            if (bmp->mPal)
+                pal = bmp->mPal->getPaletteByIndex(bmp->mPaletteIndex);
+            else if (defaultPal && defaultPal->mPalettes.size() > 0)
+                pal = defaultPal->getPaletteByIndex(bmp->mPaletteIndex);
+            else
+            {
+                printf("No default palette specified\n");
+                assert(false);
+                return -1;
+            }
+
+            // Allocate texture data for the current bitmap
+            texDataArray[i] = new uint8_t[alignedMipSize];
+
+            // Depending on flags, copy the texture data
+            if (bmp->mFlags & Bitmap::FLAG_TRANSPARENT)
+            {
+                copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texDataArray[i], 255);
+            }
+            else if (bmp->mFlags & Bitmap::FLAG_TRANSLUCENT)
+            {
+                copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texDataArray[i], 1);
+            }
+            else
+            {
+                copyMipRGBA(bmp->mWidth, bmp->mHeight, paddedWidth, pal, bmp->mMips[0], texDataArray[i], 256);
+            }
+        }
+        else if (bmp->mBitDepth == 24)
+        {
+            texDataArray[i] = new uint8_t[alignedMipSize];
+            copyMipDirectPadded(bmp->mHeight, bmp->getStride(bmp->mWidth), paddedWidth, bmp->mMips[0], texDataArray[i]);
+        }
+        else
+        {
+            assert(false);
+            return -1;
+        }
+    }
+
+    // Create the 2D texture array with numBitmaps layers
+    WGPUTexture tex;
+    WGPUTextureDescriptor textureDesc = {};
+    textureDesc.size = (WGPUExtent3D){pow2W, pow2H, numBitmaps};  // Use numBitmaps for the depth (layer count)
+    textureDesc.mipLevelCount = 1;
+    textureDesc.sampleCount = 1;
+    textureDesc.dimension = WGPUTextureDimension_2D;
+    textureDesc.format = firstBmp->mBGR ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;
+    textureDesc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    tex = wgpuDeviceCreateTexture(smState.gpuDevice, &textureDesc);
+
+    // Upload texture data for each layer
+    for (uint32_t i = 0; i < numBitmaps; ++i)
+    {
+        WGPUTextureDataLayout layout = {};
+        layout.offset = 0;
+        layout.bytesPerRow = paddedWidth;
+        layout.rowsPerImage = pow2H;
+
+        WGPUExtent3D size = {pow2W, pow2H, 1};
+
+        WGPUImageCopyTexture copyInfo = {};
+        copyInfo.texture = tex;
+        copyInfo.mipLevel = 0;
+        copyInfo.origin = (WGPUOrigin3D){0, 0, 0};
+        copyInfo.aspect = WGPUTextureAspect_All;
+        copyInfo.origin.z = i;  // Target the ith layer of the texture
+
+        wgpuQueueWriteTexture(smState.gpuQueue,
+                              &copyInfo,
+                              texDataArray[i],
+                              alignedMipSize,  // Padded 4 bytes per pixel (RGBA8 format)
+                              &layout,
+                              &size);
+    }
+
+    // Clean up the texture data after uploading
+    for (uint32_t i = 0; i < numBitmaps; ++i)
+    {
+        delete[] texDataArray[i];
+    }
+    delete[] texDataArray;
+
+    // Create a texture view for each layer (if necessary)
+    WGPUTextureViewDescriptor textureViewDesc = {};
+    textureViewDesc.format = firstBmp->mBGR ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;
+    textureViewDesc.dimension = WGPUTextureViewDimension_2DArray;
+    textureViewDesc.mipLevelCount = 1;
+    textureViewDesc.arrayLayerCount = numBitmaps;
+
+    WGPUTextureView texView = wgpuTextureCreateView(tex, &textureViewDesc);
+
+    // Store the texture and return the index
+    SDLState::TexInfo newInfo = {};
+    newInfo.texture = tex;
+    newInfo.textureView = texView;
+    newInfo.texBindGroup = NULL;//smState.makeSimpleTextureBG(texView, smState.modelCommonSampler);
+
+    // Find or add texture to smState.textures
+    int sz = smState.textures.size();
+    for (int i = 0; i < sz; i++)
+    {
+        if (smState.textures[i].texture == NULL)
+        {
+            smState.textures[i] = newInfo;
+            return i;
+        }
+    }
+
+    smState.textures.push_back(newInfo);
+    return (uint32_t)(smState.textures.size() - 1);
+}
+
+
 void GFXDeleteTexture(int32_t texID)
 {
    if (texID < 0 || texID >= smState.textures.size())
@@ -1489,8 +1964,7 @@ void GFXSetModelViewProjection(slm::mat4 &model, slm::mat4 &view, slm::mat4 &pro
    smState.projectionMatrix = proj;
    smState.viewMatrix = view;
    
-   CommonUniformStruct& uniforms = (smState.currentPipeline == smState.lineProgram.pipeline) ?
-   smState.lineProgram.uniforms : smState.modelProgram.uniforms;
+   CommonUniformStruct& uniforms = smState.currentProgram->uniforms;
    uniforms.projMat = smState.projectionMatrix;
    
    if (smState.currentPipeline == smState.lineProgram.pipeline)
@@ -1512,14 +1986,15 @@ void GFXSetLightPos(slm::vec3 pos, slm::vec4 ambient)
    
    if (smState.currentPipeline != smState.lineProgram.pipeline)
    {
-      smState.modelProgram.uniforms.lightPos = slm::vec4(pos.x, pos.y, pos.z, 0.0f);
-      smState.modelProgram.uniforms.lightColor = slm::vec4(ambient.x, ambient.y, ambient.z, ambient.w);
+      smState.currentProgram->uniforms.lightPos = slm::vec4(pos.x, pos.y, pos.z, 0.0f);
+      smState.currentProgram->uniforms.lightColor = slm::vec4(ambient.x, ambient.y, ambient.z, ambient.w);
    }
 }
 
 void GFXBeginModelPipelineState(ModelPipelineState state, int32_t texID, float testVal)
 {
    smState.currentPipeline = smState.modelProgram.pipelines[state];
+   smState.currentProgram = &smState.modelProgram;
    wgpuRenderPassEncoderSetPipeline(smState.renderEncoder, smState.currentPipeline);
    
    GFXSetLightPos(smState.lightPos, smState.lightColor);
@@ -1563,14 +2038,26 @@ void GFXSetModelVerts(uint32_t modelId, uint32_t vertOffset, uint32_t texOffset)
    
    wgpuRenderPassEncoderSetIndexBuffer(smState.renderEncoder, model.indexOffset.buffer, WGPUIndexFormat_Uint16, model.indexOffset.offset, model.numInds * sizeof(uint16_t));
        
-   wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 0, model.vertOffset.buffer, model.vertOffset.offset, vertSize);
-   wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 1, model.texVertOffset.buffer, model.texVertOffset.offset, texVertSize);
+   wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 0, model.vertOffset.buffer, model.vertOffset.offset + vertOffset, vertSize);
+   wgpuRenderPassEncoderSetVertexBuffer(smState.renderEncoder, 1, model.texVertOffset.buffer, model.texVertOffset.offset + texOffset, texVertSize);
+}
+
+void GFXDrawModelVerts(uint32_t numVerts, uint32_t startVerts)
+{
+   SDLState::BufferRef uniformData = smState.allocBuffer(sizeof(CommonUniformStruct), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform, 256);
+   wgpuQueueWriteBuffer(smState.gpuQueue, uniformData.buffer, uniformData.offset, &smState.currentProgram->uniforms, sizeof(CommonUniformStruct));
+   
+   uint32_t offsets[1];
+   offsets[0] = uniformData.offset;
+   wgpuRenderPassEncoderSetBindGroup(smState.renderEncoder, 0, smState.commonUniformGroup, 1, offsets);
+   
+   wgpuRenderPassEncoderDraw(smState.renderEncoder, numVerts, 1, startVerts, 0);
 }
 
 void GFXDrawModelPrims(uint32_t numVerts, uint32_t numInds, uint32_t startInds, uint32_t startVerts)
 {
    SDLState::BufferRef uniformData = smState.allocBuffer(sizeof(CommonUniformStruct), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform, 256);
-   wgpuQueueWriteBuffer(smState.gpuQueue, uniformData.buffer, uniformData.offset, &smState.modelProgram.uniforms, sizeof(CommonUniformStruct));
+   wgpuQueueWriteBuffer(smState.gpuQueue, uniformData.buffer, uniformData.offset, &smState.currentProgram->uniforms, sizeof(CommonUniformStruct));
    
    uint32_t offsets[1];
    offsets[0] = uniformData.offset;
@@ -1579,9 +2066,55 @@ void GFXDrawModelPrims(uint32_t numVerts, uint32_t numInds, uint32_t startInds, 
    wgpuRenderPassEncoderDrawIndexed(smState.renderEncoder, numInds, 1, startInds, startVerts, 0);
 }
 
+void GFXSetTerrainResources(uint32_t terrainID, int32_t matTexListID, int32_t heightMapTexID, int32_t gridMapTexID, int32_t lightmapTexID)
+{
+   SDLState::TerrainGPUResource blankRes = {};
+   while (smState.terrainResources.size() <= terrainID)
+      smState.terrainResources.push_back(blankRes);
+   
+   SDLState::TerrainGPUResource& res = smState.terrainResources[terrainID];
+   if (res.mBindGroup == NULL || 
+       (res.mMatListTexID != matTexListID) || 
+        (res.mGridMapTexID != gridMapTexID) ||
+        (res.mLightMapTexID != lightmapTexID))
+   {
+      if (res.mBindGroup != NULL)
+      {
+         wgpuBindGroupRelease(res.mBindGroup);
+      }
+      
+      WGPUTextureView squareMatView = smState.textures[matTexListID].textureView;
+      WGPUTextureView heightMapView = smState.textures[heightMapTexID].textureView;
+      WGPUTextureView gridMapView = smState.textures[gridMapTexID].textureView;
+      //WGPUTextureView lightMapView = smState.textures[lightmapTexID].textureView;
+      
+      res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, smState.modelCommonSampler, smState.modelCommonLinearSampler);
+   }
+}
+
+void GFXBeginTerrainPipelineState(TerrainPipelineState state, uint32_t terrainID, float squareSize, float gridX, float gridY, const slm::vec4* matCoords)
+{
+   smState.currentPipeline = smState.terrainProgram.pipelines[state];
+   smState.currentProgram = &smState.terrainProgram;
+   wgpuRenderPassEncoderSetPipeline(smState.renderEncoder, smState.currentPipeline);
+   
+   smState.terrainProgram.uniforms.params2.y = squareSize;
+   smState.terrainProgram.uniforms.params2.z = gridX;
+   smState.terrainProgram.uniforms.params2.w = gridY;
+   
+   SDLState::TerrainGPUResource& res = smState.terrainResources[terrainID];
+   
+   wgpuRenderPassEncoderSetBindGroup(smState.renderEncoder, 1, res.mBindGroup, 0, NULL);
+   
+   memcpy(smState.currentProgram->uniforms.squareTexCoords, matCoords, sizeof(slm::vec4)*12);
+   
+   GFXSetModelViewProjection(smState.modelMatrix, smState.viewMatrix, smState.projectionMatrix);
+}
+
 void GFXBeginLinePipelineState()
 {
    smState.currentPipeline = smState.lineProgram.pipeline;
+   smState.currentProgram = &smState.lineProgram;
    wgpuRenderPassEncoderSetPipeline(smState.renderEncoder, smState.currentPipeline);
    
    GFXSetModelViewProjection(smState.modelMatrix, smState.viewMatrix, smState.projectionMatrix);

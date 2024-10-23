@@ -27,6 +27,7 @@ endfunction()
 
 generate_escaped_string_header("TribesViewer/lineShader.wgsl" "${CMAKE_BINARY_DIR}/lineShader.wgsl.h" "sLineShaderCode")
 generate_escaped_string_header("TribesViewer/modelShader.wgsl" "${CMAKE_BINARY_DIR}/modelShader.wgsl.h" "sModelShaderCode")
+generate_escaped_string_header("TribesViewer/terrainShader.wgsl" "${CMAKE_BINARY_DIR}/terrainShader.wgsl.h" "sTerrainShaderCode")
 
 
 # Set C++ standard

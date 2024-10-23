@@ -1350,17 +1350,20 @@ public:
       
    };
    
+#pragma pack(1)
    struct GridSquare
    {
-      uint16_t flags;
+      uint8_t flags;
+      uint8_t matIndex;
       
       enum
       {
-         Split45 = 1,
-         Empty = 2,
-         HasEmpty = 4
+         // NOTE: matFlags is first followed by this
+         Split45 = 0x40, // 6
+         HasEmpty = 0x80 // 7
       };
    };
+#pragma pack()
    
    TerrainBlockList* mOwner;
    
@@ -1393,6 +1396,26 @@ public:
    inline uint32_t getHeightMapSize() const
    {
       return (mSize[0] + 1) * (mSize[1] + 1);
+   }
+   
+   inline uint32_t getHeightMapWidth() const
+   {
+      return (mSize[0] + 1);
+   }
+   
+   inline uint32_t getHeightMapHeight() const
+   {
+      return (mSize[1] + 1);
+   }
+   
+   inline uint32_t getGridMapWidth() const
+   {
+      return (mSize[0]);
+   }
+   
+   inline uint32_t getGridMapHeight() const
+   {
+      return (mSize[1]);
    }
    
    inline uint32_t getMatMapSize() const
@@ -1494,6 +1517,8 @@ public:
       }
       else
       {
+         // 15005
+         // 67657
          readCompressed(mem, 4 * getHeightMapSize(), &mHeightMap[0]);
       }
 
@@ -1634,10 +1659,12 @@ public:
       // NOTE: since we're just rendering the base level here we just factor in whats set in the square
       TerrainBlock::MaterialMap* mat = getMaterialMap(squareX, squareY);
       
-      bool emptySet = (mat->flag & TerrainBlock::GridSquare::Empty) != 0;
+      bool emptySet = (mat->flag & (1 << TerrainBlock::MaterialMap::EmptyShift)) != 0;
       bool shouldSplit45 = ((squareX ^ squareY) & 1) == 0;
       
-      sq->flags = emptySet ? (GridSquare::Empty | GridSquare::HasEmpty) : 0;
+      sq->flags = mat->flag & 0xFF;
+      sq->flags |= emptySet ? (GridSquare::HasEmpty) : 0;
+      sq->matIndex = mat->matIndex;
       
       if (shouldSplit45)
       {
@@ -2289,12 +2316,14 @@ public:
    
    std::vector<ActiveMaterial> mActiveMaterials;
    std::unordered_map<std::string, LoadedTexture> mLoadedTextures;
+   ActiveMaterial mSharedMaterials;
    
    ResManager* mResourceManager;
    Palette* mPalette;
    MaterialList* mMaterialList;
    
    bool initVB;
+   bool useShared;
    
    slm::mat4 mProjectionMatrix;
    slm::mat4 mModelMatrix;
@@ -2305,7 +2334,7 @@ public:
    
    GenericViewer() : mResourceManager(NULL), mPalette(NULL), mMaterialList(NULL)
    {
-      
+      useShared = false;
    }
    
    void updateMVP()
@@ -2324,13 +2353,79 @@ public:
          return;
       }
       
-      mActiveMaterials.resize(mMaterialList->mMaterials.size());
-      for (int i=0; i<mMaterialList->mMaterials.size(); i++)
+      if (useShared)
       {
-         Material& mat = mMaterialList->mMaterials[i];
-         ActiveMaterial& amat = mActiveMaterials[i];
-         loadTexture((const char*)mat.mFilename, amat.tex);
+         // Load as single shared layered 2d texture
+         loadSharedMaterials();
       }
+      else
+      {
+         mActiveMaterials.resize(mMaterialList->mMaterials.size());
+         for (int i=0; i<mMaterialList->mMaterials.size(); i++)
+         {
+            Material& mat = mMaterialList->mMaterials[i];
+            ActiveMaterial& amat = mActiveMaterials[i];
+            loadTexture((const char*)mat.mFilename, amat.tex);
+         }
+      }
+   }
+   
+   bool loadSharedMaterials()
+   {
+      bool fail = false;
+      std::vector<Bitmap*> bitmaps;
+      int lastSize[2];
+      lastSize[0] = -1;
+      lastSize[1] = -1;
+      
+      for (Material& mat : mMaterialList->mMaterials)
+      {
+         std::string fname = (const char*)mat.mFilename;
+         
+         // Find in resources
+         MemRStream mem(0, NULL);
+         if (mResourceManager->openFile(fname.c_str(), mem))
+         {
+            Bitmap* bmp = new Bitmap();
+            if (!bmp->read(mem))
+            {
+               fail = true;
+               break;
+            }
+            else
+            {
+               if (lastSize[0] >= 0 && lastSize[0] != bmp->mWidth && lastSize[1] != bmp->mHeight)
+               {
+                  fail = true;
+                  break;
+               }
+               
+               lastSize[0] = bmp->mWidth;
+               lastSize[1] = bmp->mHeight;
+               bitmaps.push_back(bmp);
+            }
+         }
+         else
+         {
+            fail = true;
+            break;
+         }
+      }
+      
+      if (!fail)
+      {
+         mSharedMaterials.tex.bmpFlags = 0;
+         mSharedMaterials.tex.width = lastSize[0];
+         mSharedMaterials.tex.height = lastSize[1];
+         mSharedMaterials.tex.texID = GFXLoadTextureSet(bitmaps.size(), &bitmaps[0], mPalette);
+      }
+      
+      for (Bitmap* bmp : bitmaps)
+      {
+         delete bmp;
+      }
+      
+      return !fail;
    }
    
    bool loadTexture(const char *filename, LoadedTexture& outTexInfo, bool force=false)
@@ -2377,6 +2472,11 @@ public:
    {
       for (auto itr: mLoadedTextures) { GFXDeleteTexture(itr.second.texID); }
       mLoadedTextures.clear();
+      if (mSharedMaterials.tex.texID != 0)
+      {
+         GFXDeleteTexture(mSharedMaterials.tex.texID);
+         mSharedMaterials.tex.texID = 0;
+      }
    }
    
    bool setPalette(const char *filename)
@@ -3704,11 +3804,21 @@ public:
    std::string mLastMLName;
    std::vector<uint32_t> mBlockModels;
    
+   struct BlockGPUResource
+   {
+      uint32_t mHeightMapTexID;
+      uint32_t mGridMapTexID;
+      uint32_t mLightMapTexID;
+   };
+   
+   std::vector<BlockGPUResource> mBlockResources;
+   
    TerrainViewer(ResManager* res)
    {
       mResourceManager = res;
       mPalette = NULL;
       mLastMLName = "";
+      useShared = true;
    }
    
    ~TerrainViewer()
@@ -3716,162 +3826,19 @@ public:
       clear();
    }
    
-   
-   void renderBlock(TerrainBlock& block, float squareSize)
+   void renderBlock(TerrainBlock& block, BlockGPUResource& res, float squareSize, uint32_t modelId)
    {
-      // Setup pipeline state and matrices
-      GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, 0, 1.1f);
+      const uint32_t numSquares = block.mSize[0] * block.mSize[1];
+      
+      GFXSetTerrainResources(modelId, mSharedMaterials.tex.texID, res.mHeightMapTexID, res.mGridMapTexID, res.mLightMapTexID);
+      
+      // Draw all at once
+      GFXBeginTerrainPipelineState(TerrainPipeline_Squares,
+                                   modelId, squareSize, block.mSize[0], block.mSize[1],
+                                   (slm::vec4*)TerrainBlock::MaterialMap::sMatCoords);
+      updateMVP();
       GFXSetModelViewProjection(mModelMatrix, mViewMatrix, mProjectionMatrix);
-      
-      static std::vector<slm::vec3> verts;
-      static std::vector<slm::vec2> texverts;
-      static std::vector<uint16_t> inds;
-      
-      uint32_t usedModels = 0;
-      
-      // Clear buffers
-      verts.clear();
-      texverts.clear();
-      inds.clear();
-      
-      uint32_t vertCounter = 0;
-      uint32_t squareCounter = 0;
-      const uint32_t maxSquaresPerDraw = 64;
-      
-      struct DrawBatch
-      {
-         uint32_t squareIndexes[64];
-         uint16_t squareFlags[64];
-         uint16_t matFlags[64];
-         uint32_t matIndex;
-         uint32_t usedSquares;
-         uint32_t modelId;
-      };
-      
-      static std::vector<DrawBatch> drawBatches;
-      
-      // Create batches
-      for (int y = 0; y < block.mSize[1]; y+= 8)
-      {
-         int yLast = std::min<int>(y + 8, block.mSize[1]);
-         int yCount = yLast - y;
-         
-         for (int x = 0; x < block.mSize[0]; x+= 8)
-         {
-            int xLast = std::min<int>(x + 8, block.mSize[0]);
-            int xCount = xLast - x;
-            
-            TerrainBlock::GridSquare* sq = block.findSquare(x,y);
-            TerrainBlock::MaterialMap* mat = block.getMaterialMap(x,y);
-            
-            bool newBatch = true;
-            
-            for (DrawBatch& batch : drawBatches)
-            {
-               if (batch.matIndex == mat->matIndex && batch.usedSquares < maxSquaresPerDraw)
-               {
-                  batch.squareIndexes[batch.usedSquares] = (y * block.mSize[0]) + x;
-                  batch.squareFlags[batch.usedSquares] = sq->flags;
-                  batch.matFlags[batch.usedSquares] = mat->flag;
-                  batch.usedSquares++;
-                  newBatch = false;
-                  break;
-               }
-            }
-            
-            if (newBatch)
-            {
-               DrawBatch newBatch = {};
-               newBatch.matIndex = mat->matIndex;
-               newBatch.squareIndexes[0] = (y * block.mSize[0]) + x;
-               newBatch.squareFlags[0] = sq->flags;
-               newBatch.matFlags[0] = mat->flag;
-               newBatch.usedSquares = 1;
-               newBatch.modelId = drawBatches.size();
-               
-               if (std::find(mBlockModels.begin(), mBlockModels.end(), newBatch.modelId) == mBlockModels.end())
-               {
-                  mBlockModels.push_back(newBatch.modelId);
-               }
-               
-               drawBatches.push_back(newBatch);
-            }
-         }
-      }
-      
-      // Draw batches
-      for (DrawBatch& batch : drawBatches)
-      {
-         for (uint32_t i=0; i<batch.usedSquares; i++)
-         {
-            uint32_t x = batch.squareIndexes[i] % block.mSize[0];
-            uint32_t y = batch.squareIndexes[i] / block.mSize[0];
-            
-            // Calc square heights
-            float h1 = block.getHeight(x, y);
-            float h2 = block.getHeight((x + 1), y);
-            float h3 = block.getHeight(x, (y + 1));
-            float h4 = block.getHeight((x + 1), (y + 1));
-            
-            // Add vertices for square corners
-            slm::vec3 vp(x * squareSize, y * squareSize, 0.0f);
-            verts.push_back(vp + slm::vec3(0, 0, h1));
-            verts.push_back(vp + slm::vec3(squareSize, 0, h2));
-            verts.push_back(vp + slm::vec3(0, squareSize, h3));
-            verts.push_back(vp + slm::vec3(squareSize, squareSize, h4));
-            
-            // Texcoords (material)
-            slm::vec2 texCoords[4];
-            TerrainBlock::MaterialMap::getBaseTexCoords(batch.matFlags[i], &texCoords[0]);
-            for (uint32_t i=0; i<4; i++)
-            {
-               texverts.push_back(texCoords[i]);
-            }
-            
-            // Determine indices based on Split45 flag
-            // TODO: verify these indices are correct
-            if ((batch.squareFlags[i] & TerrainBlock::GridSquare::Split45) != 0)
-            {
-               inds.push_back(vertCounter + 0); 
-               inds.push_back(vertCounter + 2);
-               inds.push_back(vertCounter + 3);
-               //
-               inds.push_back(vertCounter + 0);
-               inds.push_back(vertCounter + 3);
-               inds.push_back(vertCounter + 1);
-            }
-            else
-            {
-               inds.push_back(vertCounter + 0); 
-               inds.push_back(vertCounter + 1);
-               inds.push_back(vertCounter + 2);
-               //
-               inds.push_back(vertCounter + 1);
-               inds.push_back(vertCounter + 3);
-               inds.push_back(vertCounter + 2);
-            }
-         
-            uint32_t modelId = batch.modelId;
-            
-            // Load model data into GPU
-            GFXLoadModelData(modelId,
-                             verts.data(),
-                             texverts.data(),
-                             inds.data(),
-                             verts.size(),
-                             texverts.size(),
-                             inds.size());
-            
-            GFXBeginModelPipelineState(ModelPipeline_DefaultDiffuse, mActiveMaterials[batch.matIndex].tex.texID, 1.1f);
-            GFXSetModelVerts(modelId, 0, 0);
-            GFXDrawModelPrims(verts.size() / 3, inds.size(), 0, 0);
-            
-            // Clear the buffers for the next batch
-            verts.clear();
-            texverts.clear();
-            inds.clear();
-         }
-      }
+      GFXDrawModelVerts(numSquares * 6, 0);
    }
    
    void render()
@@ -3880,14 +3847,44 @@ public:
       slm::mat4 baseModel = mModelMatrix;
       slm::mat4 y_up = slm::rotation_x(slm::radians(-90.0f));
       mModelMatrix = baseModel * y_up;
-      updateMVP();
       
       // TODO: use the grid
       if (mBlock)
       {
+         updateMVP();
          renderBlock(*mBlock,
-                     1<<mBlockList->mScale);
+                     mBlockResources[0],
+                     1<<mBlockList->mScale, 0);
          
+      }
+      else
+      {
+         slm::vec3 offset(0,0,0);
+         uint32_t blockSize = 1<<mBlockList->mScale;
+         uint32_t count = 0;
+         
+         for (int32_t y=0; y<mBlockList->mSize[1]; y++)
+         {
+            for (int32_t x=0; x<mBlockList->mSize[0]; x++)
+            {
+               uint32_t mapOffset = (y*mBlockList->mSize[0]) + x;
+               uint32_t realBlock = mBlockList->mBlockMap[mapOffset];
+               TerrainBlock* terrainBlock = mBlockList->mBlocks[realBlock].instance;
+               
+               int32_t blockX = x << (mBlockList->mDetailCount-1);
+               int32_t blockY = y << (mBlockList->mDetailCount-1);
+               
+               slm::vec3 blockOffset(blockX << mBlockList->mScale,
+                                     blockY << mBlockList->mScale,
+                                     0.0f);
+               
+               slm::mat4 adjMat = baseModel;
+               adjMat *= y_up * slm::translation(blockOffset);
+               mModelMatrix = adjMat;
+               
+               renderBlock(*terrainBlock, mBlockResources[realBlock], blockSize, count++);
+            }
+         }
       }
       
       mModelMatrix = baseModel;
@@ -3904,15 +3901,63 @@ public:
          mMaterialList = mResourceManager->openTypedObject<MaterialList>(mBlockList->mMLName.c_str());
          initMaterials();
       }
+      
+      mBlockResources.resize(mBlockList->mBlocks.size());
+      for (uint32_t i=0; i<mBlockList->mBlocks.size(); i++)
+      {
+         loadBlockResources(*mBlockList->mBlocks[i].instance, mBlockResources[i]);
+      }
+   }
+   
+   void loadBlockResources(TerrainBlock& block, BlockGPUResource& res)
+   {
+      if (res.mHeightMapTexID != 0)
+      {
+         GFXDeleteTexture(res.mHeightMapTexID);
+         res.mHeightMapTexID = 0;
+      }
+      
+      if (res.mLightMapTexID != 0)
+      {
+         GFXDeleteTexture(res.mLightMapTexID);
+         res.mLightMapTexID = 0;
+      }
+      
+      if (res.mGridMapTexID != 0)
+      {
+         GFXDeleteTexture(res.mGridMapTexID);
+         res.mGridMapTexID = 0;
+      }
+      
+      res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_UNorm16, block.getLightMapWidth(), block.getLightMapWidth(), &block.mLightMap[0]);
+      res.mGridMapTexID = GFXLoadCustomTexture(CustomTexture_RG8, block.getGridMapWidth(), block.getGridMapHeight(), &block.mGridMapBase[0]);
+      res.mHeightMapTexID = GFXLoadCustomTexture(CustomTexture_Float, block.getHeightMapWidth(), block.getHeightMapHeight(), &block.mHeightMap[0]);
    }
    
    void clear()
    {
-      for (uint32_t modelId : mBlockModels)
+      for (BlockGPUResource& res : mBlockResources)
       {
-         GFXClearModelData(modelId);
+         if (res.mHeightMapTexID != 0)
+         {
+            GFXDeleteTexture(res.mHeightMapTexID);
+            res.mHeightMapTexID = 0;
+         }
+         
+         if (res.mLightMapTexID != 0)
+         {
+            GFXDeleteTexture(res.mLightMapTexID);
+            res.mLightMapTexID = 0;
+         }
+         
+         if (res.mGridMapTexID != 0)
+         {
+            GFXDeleteTexture(res.mGridMapTexID);
+            res.mGridMapTexID = 0;
+         }
       }
-      mBlockModels.clear();
+      
+      mBlockResources.clear();
    
       if (mBlockList != &mSingleList)
       {
