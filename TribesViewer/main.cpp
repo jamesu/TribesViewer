@@ -3716,6 +3716,12 @@ class ViewController
 public:
    slm::vec3 mViewPos;
    slm::vec3 mCamRot;
+   float mViewSpeed;
+   
+   ViewController() : mViewSpeed(1)
+   {
+      
+   }
    
    virtual void update(float dt) = 0;
    virtual bool isResourceLoaded() = 0;
@@ -3995,11 +4001,25 @@ public:
       mCamRot = slm::vec3(0,0,0);
       mDetailDist = 0.0f;
       mPaletteName = "ice.day.ppl";
+      mViewSpeed = 8;
    }
    
    ~TerrainViewerController()
    {
       mViewer.clear();
+   }
+   
+   void setOptimalView()
+   {
+      if (mViewer.mBlockList == NULL)
+         return;
+      
+      uint32_t realBlock = mViewer.mBlockList->mBlockMap[0];
+      float height = mViewer.mBlockList->mBlocks[realBlock].instance->getHeight(0,0);
+      
+      
+      //mCamRot = slm::vec3(0,90,0);
+      mViewPos = slm::vec3(0,height + 5,0);
    }
    
    void loadGrid(const char* filename, int volIdx=-1)
@@ -4031,6 +4051,7 @@ public:
       
       mViewer.setPalette(mPaletteName.c_str());
       mViewer.updateMaterials();
+      setOptimalView();
    }
    
    void loadSingleBlock(const char* filename, int volIdx=-1)
@@ -4053,7 +4074,9 @@ public:
          }
       }
       
+      mViewer.setPalette(mPaletteName.c_str());
       mViewer.updateMaterials();
+      setOptimalView();
    }
    
    
@@ -4558,7 +4581,7 @@ int MainState::loop()
    slm::mat4 rotMat = slm::rotation_z(slm::radians(currentController->mCamRot.z)) * slm::rotation_y(slm::radians(currentController->mCamRot.y)) *  slm::rotation_x(slm::radians(currentController->mCamRot.x));
    //rotMat = inverse(rotMat);
    slm::vec4 forwardVec = rotMat * slm::vec4(deltaMovement, 1);
-   currentController->mViewPos += forwardVec.xyz() * dt;
+   currentController->mViewPos += forwardVec.xyz() * currentController->mViewSpeed * dt;
    
    int w, h;
    SDL_GetWindowSize(window, &w, &h);

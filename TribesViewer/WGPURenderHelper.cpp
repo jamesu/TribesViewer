@@ -2106,7 +2106,7 @@ void GFXBeginTerrainPipelineState(TerrainPipelineState state, uint32_t terrainID
    
    wgpuRenderPassEncoderSetBindGroup(smState.renderEncoder, 1, res.mBindGroup, 0, NULL);
    
-   memcpy(smState.currentProgram->uniforms.squareTexCoords, matCoords, sizeof(slm::vec4)*12);
+   memcpy(smState.currentProgram->uniforms.squareTexCoords, matCoords, sizeof(slm::vec4)*16);
    
    GFXSetModelViewProjection(smState.modelMatrix, smState.viewMatrix, smState.projectionMatrix);
 }
