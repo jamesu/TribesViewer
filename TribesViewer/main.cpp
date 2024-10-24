@@ -4021,7 +4021,7 @@ public:
          res.mGridMapTexID = 0;
       }
       
-      res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_UNorm16, block.getLightMapWidth(), block.getLightMapWidth(), &block.mLightMap[0]);
+      res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_LM16, block.getLightMapWidth(), block.getLightMapWidth(), &block.mLightMap[0]);
       res.mGridMapTexID = GFXLoadCustomTexture(CustomTexture_RG8, block.getGridMapWidth(), block.getGridMapHeight(), &block.mGridMapBase[0]);
       res.mHeightMapTexID = GFXLoadCustomTexture(CustomTexture_Float, block.getHeightMapWidth(), block.getHeightMapHeight(), &block.mHeightMap[0]);
    }

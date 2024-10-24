@@ -14,20 +14,22 @@ struct CommonUniforms {
 @group(0) @binding(0) var<uniform> uniforms: CommonUniforms;
 
 // Terrain textures
-@group(1) @binding(0) var squareTextures: texture_2d_array<f32>; // Heightmap texture
+@group(1) @binding(0) var squareTextures: texture_2d_array<f32>; // Square textures
 @group(1) @binding(1) var gridMap: texture_2d<u32>;      // squareFlags(0...3(orient), 3...6(empty), 6(Grid45)), matIndex
 @group(1) @binding(2) var heightMap: texture_2d<f32>;    // Heightmap texture
+@group(1) @binding(3) var lightMap: texture_2d<f32>;     // Lightmap texture
 
 // Samplers
-@group(1) @binding(3) var samplerPixel: sampler;
-@group(1) @binding(4) var samplerLinear: sampler;
+@group(1) @binding(4) var samplerPixel: sampler;
+@group(1) @binding(5) var samplerLinear: sampler;
 
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) texCoords: vec2<f32>,  // Pass texCoords to fragment
     @location(1) matIndex: u32,         // Pass material index to fragment
-    @location(2) debugCol: vec4<f32>
+    @location(2) debugCol: vec4<f32>,
+    @location(3) lmCoord : vec2<f32>
 };
 
 
@@ -133,6 +135,9 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
     //output.debugCol = vec4<f32>(f32((texFlag & 1u) == 1u), f32(((texFlag >> 1) & 1u) == 1u), f32(((texFlag >> 2) & 1u) == 1u), f32(texFlag == 7));
     output.debugCol = vec4<f32>(1.0, 0.0, 0.0, 0.0);
 
+    let lmQuadPos = (vec2<f32>(f32(gridX), f32(gridY))) + (pos.xy);
+    output.lmCoord = lmQuadPos * (1.0 / 512.0);
+
     return output;
 }
 
@@ -141,6 +146,7 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
 fn fragMain(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the texture array at the given texCoords and matIndex
     let sampledColor = textureSample(squareTextures, samplerLinear, input.texCoords, input.matIndex);
+    let sampledLight = textureSample(lightMap, samplerLinear, input.lmCoord);
 
     /*
     let debugSampledCol = (sampledColor.x + sampledColor.y + sampledColor.z) * (1.0/3.0);
@@ -156,7 +162,7 @@ fn fragMain(input: VertexOutput) -> @location(0) vec4<f32> {
     else
     */
     {
-        return sampledColor;
+        return sampledColor * sampledLight;
     }
 }
 

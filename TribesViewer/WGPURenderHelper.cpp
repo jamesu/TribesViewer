@@ -276,7 +276,7 @@ struct SDLState
    void endRenderPass();
    
    WGPUBindGroup makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sampler);
-   WGPUBindGroup makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear);
+   WGPUBindGroup makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUTextureView lmTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear);
    WGPURenderPassDescriptor createRenderPass(bool secondary);
 };
 
@@ -823,7 +823,7 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    
    // Terrain group layout
    
-   WGPUBindGroupLayoutEntry bindGroupLayoutEntriesTER[5];
+   WGPUBindGroupLayoutEntry bindGroupLayoutEntriesTER[6];
    // Terrain materials
    bindGroupLayoutEntriesTER[0] = {};
    bindGroupLayoutEntriesTER[0].binding = 0;
@@ -848,21 +848,29 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    bindGroupLayoutEntriesTER[2].texture.viewDimension = WGPUTextureViewDimension_2D;
    bindGroupLayoutEntriesTER[2].texture.multisampled = false;
    
-   // Sampler pixel
+   // Terrain lightmap
    bindGroupLayoutEntriesTER[3] = {};
    bindGroupLayoutEntriesTER[3].binding = 3;
-   bindGroupLayoutEntriesTER[3].visibility = WGPUShaderStage_Vertex;
-   bindGroupLayoutEntriesTER[3].sampler.type = WGPUSamplerBindingType_NonFiltering;
+   bindGroupLayoutEntriesTER[3].visibility = WGPUShaderStage_Fragment;
+   bindGroupLayoutEntriesTER[3].texture.sampleType = WGPUTextureSampleType_Float;
+   bindGroupLayoutEntriesTER[3].texture.viewDimension = WGPUTextureViewDimension_2D;
+   bindGroupLayoutEntriesTER[3].texture.multisampled = false;
    
-   // Sampler linear
+   // Sampler pixel
    bindGroupLayoutEntriesTER[4] = {};
    bindGroupLayoutEntriesTER[4].binding = 4;
-   bindGroupLayoutEntriesTER[4].visibility = WGPUShaderStage_Fragment;
-   bindGroupLayoutEntriesTER[4].sampler.type = WGPUSamplerBindingType_Filtering;
+   bindGroupLayoutEntriesTER[4].visibility = WGPUShaderStage_Vertex;
+   bindGroupLayoutEntriesTER[4].sampler.type = WGPUSamplerBindingType_NonFiltering;
+   
+   // Sampler linear
+   bindGroupLayoutEntriesTER[5] = {};
+   bindGroupLayoutEntriesTER[5].binding = 5;
+   bindGroupLayoutEntriesTER[5].visibility = WGPUShaderStage_Fragment;
+   bindGroupLayoutEntriesTER[5].sampler.type = WGPUSamplerBindingType_Filtering;
    
    WGPUBindGroupLayoutDescriptor bindGroupLayoutDescTER = {};
    bindGroupLayoutDescTER.label = "Terrain Bind Group Layout";
-   bindGroupLayoutDescTER.entryCount = 5;
+   bindGroupLayoutDescTER.entryCount = 6;
    bindGroupLayoutDescTER.entries = bindGroupLayoutEntriesTER;
    
    smState.terrainTextureLayout = wgpuDeviceCreateBindGroupLayout(smState.gpuDevice, &bindGroupLayoutDescTER);
@@ -1237,9 +1245,9 @@ WGPUBindGroup SDLState::makeSimpleTextureBG(WGPUTextureView tex, WGPUSampler sam
    return wgpuDeviceCreateBindGroup(gpuDevice, &bindGroupDesc);
 }
 
-WGPUBindGroup SDLState::makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear)
+WGPUBindGroup SDLState::makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUTextureView heightmapTex, WGPUTextureView mapTex, WGPUTextureView lmTex, WGPUSampler samplerPixel, WGPUSampler samplerLinear)
 {
-   WGPUBindGroupEntry bindGroupEntries[5];
+   WGPUBindGroupEntry bindGroupEntries[6];
    
    // Texture entry
    bindGroupEntries[0] = {};
@@ -1253,20 +1261,24 @@ WGPUBindGroup SDLState::makeTerrainTextureBG(WGPUTextureView squareMatTex, WGPUT
    bindGroupEntries[2] = {};
    bindGroupEntries[2].binding = 2;
    bindGroupEntries[2].textureView = heightmapTex;
-   
-   // Sampler entry
+   // Texture entry
    bindGroupEntries[3] = {};
    bindGroupEntries[3].binding = 3;
-   bindGroupEntries[3].sampler = samplerPixel;
+   bindGroupEntries[3].textureView = lmTex;
+   
    // Sampler entry
    bindGroupEntries[4] = {};
    bindGroupEntries[4].binding = 4;
-   bindGroupEntries[4].sampler = samplerLinear;
+   bindGroupEntries[4].sampler = samplerPixel;
+   // Sampler entry
+   bindGroupEntries[5] = {};
+   bindGroupEntries[5].binding = 5;
+   bindGroupEntries[5].sampler = samplerLinear;
    
    WGPUBindGroupDescriptor bindGroupDesc = {};
    bindGroupDesc.label = "TerrainLayout";
    bindGroupDesc.layout = smState.terrainTextureLayout;
-   bindGroupDesc.entryCount = 5;
+   bindGroupDesc.entryCount = 6;
    bindGroupDesc.entries = bindGroupEntries;
    
    // Create the bind group
@@ -1529,6 +1541,7 @@ int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t h
    WGPUTextureFormat pixFormat = WGPUTextureFormat_Undefined;
    
    uint32_t bpp = 4;
+   bool is565 = false;
    
    switch (fmt)
    {
@@ -1540,7 +1553,11 @@ int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t h
          bpp = 2;
          pixFormat = WGPUTextureFormat_RG8Uint;
          break;
-      case CustomTexture_UNorm16:
+      case CustomTexture_LM16: // 565
+         bpp = 4;
+         pixFormat = WGPUTextureFormat_RGBA8Unorm;
+         is565 = true;
+         break;
       case CustomTexture_TerrainSquare:
          bpp = 2;
          pixFormat = WGPUTextureFormat_R16Uint;
@@ -1556,7 +1573,14 @@ int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t h
    texData = new uint8_t[alignedMipSize];
    memset(texData, 0, alignedMipSize);
    
-   copyMipDirect(height, width*bpp, paddedWidth, (uint8_t*)data, texData);
+   if (!is565)
+   {
+      copyMipDirect(height, width*bpp, paddedWidth, (uint8_t*)data, texData);
+   }
+   else
+   {
+      copyLMMipDirect(height, width*2, paddedWidth, (uint8_t*)data, texData);
+   }
    
    WGPUTexture tex;
    if (texData)
@@ -2092,9 +2116,9 @@ void GFXSetTerrainResources(uint32_t terrainID, int32_t matTexListID, int32_t he
       WGPUTextureView squareMatView = smState.textures[matTexListID].textureView;
       WGPUTextureView heightMapView = smState.textures[heightMapTexID].textureView;
       WGPUTextureView gridMapView = smState.textures[gridMapTexID].textureView;
-      //WGPUTextureView lightMapView = smState.textures[lightmapTexID].textureView;
+      WGPUTextureView lightMapView = smState.textures[lightmapTexID].textureView;
       
-      res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, smState.modelCommonSampler, smState.modelCommonLinearClampSampler);
+      res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, lightMapView, smState.modelCommonSampler, smState.modelCommonLinearClampSampler);
    }
 }
 

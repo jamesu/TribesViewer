@@ -523,6 +523,33 @@ inline void copyMipDirect(uint32_t height, uint32_t src_stride, uint32_t dest_st
    }
 }
 
+inline void copyLMMipDirect(uint32_t height, uint32_t src_stride, uint32_t dest_stride, uint8_t* data, uint8_t* out_data)
+{
+    for (uint32_t y = 0; y < height; y++)
+    {
+        uint16_t* srcPixels = (uint16_t*)(data + y * src_stride);
+        uint32_t* destPixels = (uint32_t*)(out_data + y * dest_stride);
+
+        for (uint32_t x = 0; x < src_stride / 2; x++)
+        {
+            uint16_t irgb4444 = srcPixels[x];
+
+            uint32_t i = (irgb4444 >> 12) & 0xF;
+            uint32_t r = (irgb4444 >> 8) & 0xF;
+            uint32_t g = (irgb4444 >> 4) & 0xF;
+            uint32_t b = irgb4444 & 0xF;
+
+            // TODO: verify this is actually correct; shadows seem too dark.
+            float im = ((float)i / 15.0);
+            r = ((float)r / 15.0) * im * 255;
+            g = ((float)g / 15.0) * im * 255;
+            b = ((float)b / 15.0) * im * 255;
+
+            destPixels[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+}
+
 inline void copyMipDirectPadded2(uint32_t height, uint32_t src_stride, uint32_t dest_stride, uint8_t* data, uint8_t* out_data)
 {
    for (int y=0; y<height; y++)
