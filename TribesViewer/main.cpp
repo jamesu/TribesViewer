@@ -1632,8 +1632,8 @@ public:
    inline MaterialMap* getMaterialMap(int32_t x, int32_t y)
    {
       return (&mMatMap[0] +
-               (x) +
-               (y * mSize[0]));
+               (y * mSize[0])
+              + x);
    }
    
    void buildGridMap()
@@ -1662,66 +1662,144 @@ public:
       bool emptySet = (mat->flag & (1 << TerrainBlock::MaterialMap::EmptyShift)) != 0;
       bool shouldSplit45 = ((squareX ^ squareY) & 1) == 0;
       
-      sq->flags = mat->flag & 0xFF;
+      sq->flags = mat->flag & TerrainBlock::MaterialMap::RotateMask;
       sq->flags |= emptySet ? (GridSquare::HasEmpty) : 0;
       sq->matIndex = mat->matIndex;
       
       if (shouldSplit45)
       {
-          sq->flags |= GridSquare::Split45;
+         //sq->flags = 1;
+         sq->flags |= GridSquare::Split45;
       }
    }
 };
 
 // NOTE: pre-gen'd based on flags
 slm::vec2 TerrainBlock::MaterialMap::sMatCoords[8][4] = {
+   /*
    {
       slm::vec2(0.0f, 1.0f),
-      slm::vec2(0.0f, 0.0f),
-      slm::vec2(1.0f, 0.0f),
-      slm::vec2(1.0f, 1.0f),
+      slm::vec2(2.0f, 3.0f),
+      slm::vec2(4.0f, 5.0f),
+      slm::vec2(6.0f, 7.0f),
    },
    {
-      slm::vec2(1.0, 1.0),
+      slm::vec2(0.0f+8, 1.0f+8),
+      slm::vec2(2.0f+8, 3.0f+8),
+      slm::vec2(4.0f+8, 5.0f+8),
+      slm::vec2(6.0f+8, 7.0f+8),
+   },
+   {
+      slm::vec2(0.0f+16, 1.0f+16),
+      slm::vec2(2.0f+16, 3.0f+16),
+      slm::vec2(4.0f+16, 5.0f+16),
+      slm::vec2(6.0f+16, 7.0f+16),
+   },
+   {
+      slm::vec2(0.0f+24, 1.0f+24),
+      slm::vec2(2.0f+24, 3.0f+24),
+      slm::vec2(4.0f+24, 5.0f+24),
+      slm::vec2(6.0f+24, 7.0f+24),
+   },
+   {
+      slm::vec2(0.0f+32, 1.0f+32),
+      slm::vec2(2.0f+32, 3.0f+32),
+      slm::vec2(4.0f+32, 5.0f+32),
+      slm::vec2(6.0f+32, 7.0f+32),
+   },
+   {
+      slm::vec2(0.0f+40, 1.0f+40),
+      slm::vec2(2.0f+40, 3.0f+40),
+      slm::vec2(4.0f+40, 5.0f+40),
+      slm::vec2(6.0f+40, 7.0f+40),
+   },
+   {
+      slm::vec2(0.0f+48, 1.0f+48),
+      slm::vec2(2.0f+48, 3.0f+48),
+      slm::vec2(4.0f+48, 5.0f+48),
+      slm::vec2(6.0f+48, 7.0f+48),
+   },
+   {
+      slm::vec2(0.0f+56, 1.0f+56),
+      slm::vec2(2.0f+56, 3.0f+56),
+      slm::vec2(4.0f+56, 5.0f+56),
+      slm::vec2(6.0f+56, 7.0f+56),
+   },
+   */
+   
+   // NOTE: Eyeball'd from existing terrains
+   
+   // Plain
+   {
+      // 0
+      slm::vec2(0.0f, 0.0f), // tl
+      slm::vec2(1.0f, 0.0f), // tr
+      // 1
+      slm::vec2(1.0f, 1.0f), // br
+      slm::vec2(0.0f, 1.0f), // bl
+   },
+   // Rotate
+   {
+      // 2
       slm::vec2(0.0, 1.0),
       slm::vec2(0.0, 0.0),
-      slm::vec2(1.0, 0.0)
-   },
-   {
-      slm::vec2(1.0, 1.0),
+      // 3
       slm::vec2(1.0, 0.0),
-      slm::vec2(0.0, 0.0),
-      slm::vec2(0.0, 1.0)
-   },
-   {
-      slm::vec2(0.0, 1.0), 
       slm::vec2(1.0, 1.0),
+   },
+   // FlipX
+   {
+      // 4
+      slm::vec2(1.0, 0.0),  // 1
+      slm::vec2(0.0, 0.0),  // 2
+      // 5
+      slm::vec2(0.0, 1.0),  // 3
+      slm::vec2(1.0, 1.0)   // 0
+   },
+   // FlipX | Rotate
+   {
+      // 6
+      slm::vec2(1.0, 1.0), // tl
+      slm::vec2(1.0, 0.0), // tr
+      // 7
+      slm::vec2(0.0, 0.0), // br
+      slm::vec2(0.0, 1.0)  // bl
+   },
+   // FlipY CHKD
+   {
+      // 8
+      slm::vec2(0.0, 1.0),
+      slm::vec2(1.0, 1.0),
+      // 9
       slm::vec2(1.0, 0.0),
       slm::vec2(0.0, 0.0)
    },
+   // FlipY | Rotate
    {
-      slm::vec2(0.0, 0.0), 
-      slm::vec2(0.0, 1.0),
-      slm::vec2(1.0, 1.0),
-      slm::vec2(1.0, 0.0)
-   },
-   {
-      slm::vec2(1.0, 0.0), 
+      // 10
       slm::vec2(0.0, 0.0),
       slm::vec2(0.0, 1.0),
-      slm::vec2(1.0, 1.0)
-   },
-   {
+      // 11
+      slm::vec2(1.0, 1.0),
       slm::vec2(1.0, 0.0),
+   },
+   // FlipX | FlipY
+   {
+      // 12
       slm::vec2(1.0, 1.0),
       slm::vec2(0.0, 1.0),
-      slm::vec2(0.0, 0.0)
-   },
-   {
-      slm::vec2(0.0, 0.0), 
+      // 13
+      slm::vec2(0.0, 0.0),
       slm::vec2(1.0, 0.0),
-      slm::vec2(1.0, 1.0),
-      slm::vec2(0.0, 1.0)
+   },
+   // FlipX | FlipY | Rotate
+   {
+      // 14
+      slm::vec2(1.0, 0.0), // tl
+      slm::vec2(1.0, 1.0), // tr
+      // 15
+      slm::vec2(0.0, 1.0), // br
+      slm::vec2(0.0, 0.0)  // bl
    }
 };
 
@@ -2356,7 +2434,10 @@ public:
       if (useShared)
       {
          // Load as single shared layered 2d texture
-         loadSharedMaterials();
+         if (!loadSharedMaterials())
+         {
+            assert(false);
+         }
       }
       else
       {
@@ -2378,8 +2459,11 @@ public:
       lastSize[0] = -1;
       lastSize[1] = -1;
       
+      int count = 0;
+      
       for (Material& mat : mMaterialList->mMaterials)
       {
+         //mat = mMaterialList->mMaterials[98];
          std::string fname = (const char*)mat.mFilename;
          
          // Find in resources
@@ -2410,6 +2494,8 @@ public:
             fail = true;
             break;
          }
+         
+         count++;
       }
       
       if (!fail)
@@ -4001,7 +4087,7 @@ public:
       mCamRot = slm::vec3(0,0,0);
       mDetailDist = 0.0f;
       mPaletteName = "ice.day.ppl";
-      mViewSpeed = 8;
+      mViewSpeed = 64;
    }
    
    ~TerrainViewerController()

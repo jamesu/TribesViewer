@@ -27,6 +27,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) texCoords: vec2<f32>,  // Pass texCoords to fragment
     @location(1) matIndex: u32,         // Pass material index to fragment
+    @location(2) debugCol: vec4<f32>
 };
 
 
@@ -42,20 +43,21 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
     let gridY = quadID / u32(uniforms.params2.z);
 
     // Compute texture coordinates for the terrainData texture to get quad parameters
-    let texCoord = vec2<f32>(
-        f32(gridX) / 256.0,  // X coordinate
-        f32(gridY) / 256.0   // Y coordinate
+    let texCoord = vec2<u32>(
+        (gridX),  // X coordinate
+        (gridY)   // Y coordinate
     );
 
     // Sample the terrain data for the current quad
-    let quadData: vec4<u32> = textureLoad(gridMap, vec2<i32>(texCoord * vec2<f32>(256.0)), 0);
+    let quadData: vec4<u32> = textureLoad(gridMap, vec2<u32>(texCoord), 0);
     let matFlag = u32(quadData.r);
     let matIndex = u32(quadData.g);
-    let texFlag = u32(matFlag) & 0x1Fu;
+    let texFlag = (u32(matFlag) & 0x7);
+    let vertTexBase = texFlag * 2;
     
     // Extract flags
-    let grid45 = (u32(quadData.r) >> 6u) & (1u);
-    let empty = (u32(quadData.r) >> 3u) & (1u);
+    let grid45 = (matFlag >> 6u) & (1u);
+    let empty = (matFlag >> 3u) & (1u);
 
     // Check if the Empty flag is set
     if (empty == 1u) {
@@ -68,36 +70,40 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
 
     // Define corner positions for each vertex (local quad space)
     let cornerPos = array<vec2<f32>, 4>(
-        vec2<f32>(0.0, 0.0),  // Top-left
-        vec2<f32>(1.0, 0.0),  // Top-right
-        vec2<f32>(1.0, 1.0),  // Bottom-right
-        vec2<f32>(0.0, 1.0)   // Bottom-left
+        vec2<f32>(0.0, 1.0),  // Top-left
+        vec2<f32>(1.0, 1.0),  // Top-right
+        vec2<f32>(1.0, 0.0),  // Bottom-right
+        vec2<f32>(0.0, 0.0)   // Bottom-left
     );
 
     var pos: vec2<f32>;
     var tex: vec2<f32>;
 
+    // NOTE: top = bottom here. Left/right is ok.
+
     if (grid45 == 1u) {
         // Flip the triangle order when Grid45 flag is set
         switch (vertexID % 6u) {
-            case 0u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(texFlag*2) + 0].xy; } // Top-left
-            case 1u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(texFlag*2) + 0].zw; } // Top-right
-            case 2u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(texFlag*2) + 1].zw; } // Bottom-left
-            case 3u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(texFlag*2) + 1].zw; } // Bottom-left
-            case 4u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(texFlag*2) + 0].zw; } // Top-right
-            case 5u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(texFlag*2) + 1].xy; } // Bottom-right
-            default: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(texFlag*2) + 0].xy; }
+            case 0u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(vertTexBase) + 0].xy; } // Top-left
+            case 1u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(vertTexBase) + 0].zw; } // Top-right
+            case 2u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(vertTexBase) + 1].zw; } // Bottom-left
+            case 3u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(vertTexBase) + 1].zw; } // Bottom-left
+            case 4u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(vertTexBase) + 0].zw; } // Top-right
+            case 5u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(vertTexBase) + 1].xy; } // Bottom-right
+            default: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(vertTexBase) + 0].xy; }
         }
+        //pos.x = 0.0;
+        //pos.y = 0.0;
     } else {
         // Default triangle strip order
         switch (vertexID % 6u) {
-            case 0u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(texFlag*2) + 0].xy; } // Top-left
-            case 1u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(texFlag*2) + 0].zw; } // Top-right
-            case 2u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(texFlag*2) + 1].xy; } // Bottom-right
-            case 3u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(texFlag*2) + 1].xy; } // Bottom-right
-            case 4u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(texFlag*2) + 1].zw; } // Bottom-left
-            case 5u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(texFlag*2) + 0].xy; } // Top-left
-            default: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(texFlag*2) + 0].xy; }
+            case 0u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(vertTexBase) + 0].xy; } // Top-left
+            case 1u: { pos = cornerPos[1]; tex = uniforms.sq01Tex[(vertTexBase) + 0].zw; } // Top-right
+            case 2u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(vertTexBase) + 1].xy; } // Bottom-right
+            case 3u: { pos = cornerPos[2]; tex = uniforms.sq01Tex[(vertTexBase) + 1].xy; } // Bottom-right
+            case 4u: { pos = cornerPos[3]; tex = uniforms.sq01Tex[(vertTexBase) + 1].zw; } // Bottom-left
+            case 5u: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(vertTexBase) + 0].xy; } // Top-left
+            default: { pos = cornerPos[0]; tex = uniforms.sq01Tex[(vertTexBase) + 0].xy; }
         }
     }
 
@@ -124,6 +130,8 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
     output.position = clipPosition;
     output.texCoords = tex.xy;
     output.matIndex = matIndex;
+    //output.debugCol = vec4<f32>(f32((texFlag & 1u) == 1u), f32(((texFlag >> 1) & 1u) == 1u), f32(((texFlag >> 2) & 1u) == 1u), f32(texFlag == 7));
+    output.debugCol = vec4<f32>(1.0, 0.0, 0.0, 0.0);
 
     return output;
 }
@@ -133,6 +141,22 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
 fn fragMain(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the texture array at the given texCoords and matIndex
     let sampledColor = textureSample(squareTextures, samplerLinear, input.texCoords, input.matIndex);
-    return sampledColor;
+
+    /*
+    let debugSampledCol = (sampledColor.x + sampledColor.y + sampledColor.z) * (1.0/3.0);
+
+    if (input.debugCol.a > 0.0 && input.texCoords.x > 0.95 && input.texCoords.y < 0.5)
+    {
+        return input.debugCol;
+    }
+    else if (input.debugCol.a > 0.0 && input.texCoords.y > 0.95)
+    {
+        return vec4<f32>(1.0,1.0,1.0,1.0);
+    }
+    else
+    */
+    {
+        return sampledColor;
+    }
 }
 

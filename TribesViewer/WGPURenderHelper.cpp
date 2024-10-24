@@ -191,6 +191,7 @@ struct SDLState
    
    WGPUSampler modelCommonSampler;
    WGPUSampler modelCommonLinearSampler;
+   WGPUSampler modelCommonLinearClampSampler;
    WGPUBindGroupLayout commonUniformLayout;
    WGPUBindGroupLayout commonTextureLayout;
    WGPUBindGroupLayout terrainTextureLayout;
@@ -771,6 +772,10 @@ int GFXSetup(SDL_Window* window, SDL_Renderer* renderer)
    samplerDesc.maxAnisotropy = 1;
    smState.modelCommonLinearSampler = wgpuDeviceCreateSampler(smState.gpuDevice, &samplerDesc);
    
+   samplerDesc.addressModeU = WGPUAddressMode_ClampToEdge;
+   samplerDesc.addressModeV = WGPUAddressMode_ClampToEdge;
+   smState.modelCommonLinearClampSampler = wgpuDeviceCreateSampler(smState.gpuDevice, &samplerDesc);
+   
    // Make common uniform buffer layout
    
    // Create the bind group layout
@@ -886,6 +891,7 @@ SDLState::SDLState()
 {
    modelCommonSampler = NULL;
    modelCommonLinearSampler = NULL;
+   modelCommonLinearClampSampler = NULL;
    commonUniformLayout = NULL;
    commonTextureLayout = NULL;
    terrainTextureLayout = NULL;
@@ -2088,7 +2094,7 @@ void GFXSetTerrainResources(uint32_t terrainID, int32_t matTexListID, int32_t he
       WGPUTextureView gridMapView = smState.textures[gridMapTexID].textureView;
       //WGPUTextureView lightMapView = smState.textures[lightmapTexID].textureView;
       
-      res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, smState.modelCommonSampler, smState.modelCommonLinearSampler);
+      res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, smState.modelCommonSampler, smState.modelCommonLinearClampSampler);
    }
 }
 
