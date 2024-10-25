@@ -1553,6 +1553,10 @@ int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t h
          bpp = 2;
          pixFormat = WGPUTextureFormat_RG8Uint;
          break;
+      case CustomTexture_RGBA8:
+         bpp = 4;
+         pixFormat = WGPUTextureFormat_RGBA8Unorm;
+         break;
       case CustomTexture_LM16: // 565
          bpp = 4;
          pixFormat = WGPUTextureFormat_RGBA8Unorm;

@@ -1250,7 +1250,7 @@ public:
       for (uint32_t i=0; i<numBlocks; i++)
       {
          mem.read(mBlocks[i].ident);
-         mem.readSString(mBlocks[i].name);
+         mem.readSString32(mBlocks[i].name);
       }
       
       return true;
@@ -4021,7 +4021,21 @@ public:
          res.mGridMapTexID = 0;
       }
       
-      res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_LM16, block.getLightMapWidth(), block.getLightMapWidth(), &block.mLightMap[0]);
+      if (block.mLightMap.size() != 0)
+      {
+         res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_LM16, block.getLightMapWidth(), block.getLightMapWidth(), &block.mLightMap[0]);
+      }
+      else
+      {
+         const uint32_t full = 0xFFFFFFFF;
+         uint32_t tex[16*16];
+         for (uint32_t i=0; i<16*16; i++)
+         {
+            tex[i] = full;
+         }
+         res.mLightMapTexID = GFXLoadCustomTexture(CustomTexture_RGBA8, 16, 16, tex);
+      }
+      
       res.mGridMapTexID = GFXLoadCustomTexture(CustomTexture_RG8, block.getGridMapWidth(), block.getGridMapHeight(), &block.mGridMapBase[0]);
       res.mHeightMapTexID = GFXLoadCustomTexture(CustomTexture_Float, block.getHeightMapWidth(), block.getHeightMapHeight(), &block.mHeightMap[0]);
    }

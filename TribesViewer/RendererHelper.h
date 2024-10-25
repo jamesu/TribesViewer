@@ -12,6 +12,7 @@ enum CustomTextureFormat
 {
    CustomTexture_Float,
    CustomTexture_RG8,
+   CustomTexture_RGBA8,
    CustomTexture_LM16,
    CustomTexture_TerrainSquare
 };
