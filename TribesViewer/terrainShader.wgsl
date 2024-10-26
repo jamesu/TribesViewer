@@ -3,7 +3,7 @@ struct CommonUniforms {
     viewMat: mat4x4<f32>,
     modelMat: mat4x4<f32>,
     params1: vec4<f32>, // viewportScale.xy, lineWidth
-    params2: vec4<f32>, // alphaTestF, squareSize, hmX, hmY
+    params2: vec4<f32>, // alphaTestF, squareSize, hmX, lmW
     lightPos: vec4<f32>,
     lightColor: vec4<f32>,
 
@@ -136,7 +136,7 @@ fn vertMain(@builtin(vertex_index) vertexID: u32) -> VertexOutput {
     output.debugCol = vec4<f32>(1.0, 0.0, 0.0, 0.0);
 
     let lmQuadPos = (vec2<f32>(f32(gridX), f32(gridY))) + (pos.xy);
-    output.lmCoord = lmQuadPos * (1.0 / 512.0);
+    output.lmCoord = lmQuadPos * (1.0 / uniforms.params2.w);
 
     return output;
 }

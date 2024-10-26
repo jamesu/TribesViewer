@@ -180,6 +180,7 @@ struct SDLState
       WGPUTexture texture;
       WGPUTextureView textureView;
       WGPUBindGroup texBindGroup;
+      uint32_t dims[3];
    };
    
    std::vector<FrameModel> models;
@@ -1636,6 +1637,9 @@ int32_t GFXLoadCustomTexture(CustomTextureFormat fmt, uint32_t width, uint32_t h
       newInfo.texture = tex;
       newInfo.textureView = texView;
       newInfo.texBindGroup = NULL;
+      newInfo.dims[0] = textureDesc.size.width;
+      newInfo.dims[1] = textureDesc.size.height;
+      newInfo.dims[2] = textureDesc.size.depthOrArrayLayers;
       
       // Find or add texture to smState.textures
       int sz = smState.textures.size();
@@ -1762,6 +1766,9 @@ int32_t GFXLoadTexture(Bitmap* bmp, Palette* defaultPal)
       SDLState::TexInfo newInfo = {};
       newInfo.texture = tex;
       newInfo.textureView = texView;
+      newInfo.dims[0] = textureDesc.size.width;
+      newInfo.dims[1] = textureDesc.size.height;
+      newInfo.dims[2] = textureDesc.size.depthOrArrayLayers;
       newInfo.texBindGroup = smState.makeSimpleTextureBG(texView, smState.modelCommonSampler);
       
       // Find or add texture to smState.textures
@@ -1905,6 +1912,9 @@ int32_t GFXLoadTextureSet(uint32_t numBitmaps, Bitmap** bmps, Palette* defaultPa
     SDLState::TexInfo newInfo = {};
     newInfo.texture = tex;
     newInfo.textureView = texView;
+    newInfo.dims[0] = textureDesc.size.width;
+    newInfo.dims[1] = textureDesc.size.height;
+    newInfo.dims[2] = textureDesc.size.depthOrArrayLayers;
     newInfo.texBindGroup = NULL;//smState.makeSimpleTextureBG(texView, smState.modelCommonSampler);
 
     // Find or add texture to smState.textures
@@ -2121,6 +2131,7 @@ void GFXSetTerrainResources(uint32_t terrainID, int32_t matTexListID, int32_t he
       WGPUTextureView heightMapView = smState.textures[heightMapTexID].textureView;
       WGPUTextureView gridMapView = smState.textures[gridMapTexID].textureView;
       WGPUTextureView lightMapView = smState.textures[lightmapTexID].textureView;
+      smState.terrainProgram.uniforms.params2.w = smState.textures[lightmapTexID].dims[0];
       
       res.mBindGroup = smState.makeTerrainTextureBG(squareMatView, heightMapView, gridMapView, lightMapView, smState.modelCommonSampler, smState.modelCommonLinearClampSampler);
    }
@@ -2134,7 +2145,6 @@ void GFXBeginTerrainPipelineState(TerrainPipelineState state, uint32_t terrainID
    
    smState.terrainProgram.uniforms.params2.y = squareSize;
    smState.terrainProgram.uniforms.params2.z = gridX;
-   smState.terrainProgram.uniforms.params2.w = gridY;
    
    SDLState::TerrainGPUResource& res = smState.terrainResources[terrainID];
    
